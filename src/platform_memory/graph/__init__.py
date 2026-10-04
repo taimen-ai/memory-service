@@ -1,4 +1,4 @@
-"""platform_memory.graph — слой графа поверх Apache AGE."""
+"""platform_memory.graph — слой графа в таблицах PostgreSQL (MEM-ADR-023)."""
 
 from platform_memory.graph.analyze import (
     cross_community_connections,

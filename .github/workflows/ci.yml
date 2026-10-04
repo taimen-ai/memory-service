@@ -1,9 +1,10 @@
 name: CI
 
-# Fast checks on every push to the trunk, on release tags and on pull requests:
-# ruff and the unit tests. No external services are started — integration tests
-# (tests/integration, marker `integration`) need PostgreSQL with AGE + pgvector
-# and run locally with CB_TEST_DATABASE_URL (see tests/integration/conftest.py).
+# Шаги зовут цели Makefile — те же, что checks в .agents/runner.yaml; команд
+# проверок здесь нет. На каждый push и PR — линт и unit-тесты (интеграционные
+# без CB_TEST_DATABASE_URL скипаются). Полный набор с базой memory-db — по
+# запросу (workflow_dispatch) и на тегах: образ базы собирается из infra/memory-db.
+# Ветка main — транк публичного репозитория (релизная проекция), master — приватного.
 on:
   push:
     branches: [master, main]
@@ -20,29 +21,63 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: memory-service
+        working-directory: services/memory-service
     steps:
-      # platform-auth-sdk is a path dependency (../platform-auth-sdk, ADR-018;
-      # flat layout of the superproject, ADR-0029).
+      # platform-auth-sdk — path-зависимость (../../sdk/platform-auth-sdk, ADR-018;
+      # checkout повторяет раскладку суперпроекта, TAI-ADR-0064).
       - uses: actions/checkout@v4
         with:
-          path: memory-service
+          path: services/memory-service
       - uses: actions/checkout@v4
         with:
           repository: ${{ vars.PLATFORM_AUTH_SDK_REPO || 'taimen-ai/platform-auth-sdk' }}
           ssh-key: ${{ secrets.PLATFORM_AUTH_SDK_DEPLOY_KEY }}
-          path: platform-auth-sdk
-      - uses: astral-sh/setup-uv@v4
+          path: sdk/platform-auth-sdk
+      - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-          cache-dependency-glob: memory-service/uv.lock
-      - name: Install dependencies
-        run: uv sync --frozen --extra mcp
-      - name: ruff
+          cache-dependency-glob: services/memory-service/uv.lock
+      - run: make install
+      - run: make lint
+      - run: make test
+
+  integration:
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/memory-service
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: services/memory-service
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PLATFORM_AUTH_SDK_REPO || 'taimen-ai/platform-auth-sdk' }}
+          ssh-key: ${{ secrets.PLATFORM_AUTH_SDK_DEPLOY_KEY }}
+          path: sdk/platform-auth-sdk
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: services/memory-service/uv.lock
+      # Шаг, а не services: образа memory-db нет в реестре, он собирается здесь.
+      - name: Start memory-db
         run: |
-          uv run ruff check .
-          uv run ruff format --check .
-      - name: Unit tests
+          docker build -t memory-db:ci infra/memory-db
+          docker run -d --name memory-db -p 5435:5432 \
+            -e POSTGRES_USER=memory -e POSTGRES_PASSWORD=memory -e POSTGRES_DB=memory_test \
+            memory-db:ci
+          # По TCP: временный сервер инициализации слушает только сокет, так что
+          # готовность означает, что init/ (AGE, pgvector, граф) уже выполнен.
+          for i in $(seq 1 60); do
+            docker exec memory-db pg_isready -h 127.0.0.1 -U memory -d memory_test && exit 0
+            sleep 1
+          done
+          docker logs memory-db
+          exit 1
+      - run: make install
+      - run: make lint
+      - name: make test
         env:
-          CB_TEST_DATABASE_URL: ""
-        run: uv run pytest -q -m "not integration"
+          CB_TEST_DATABASE_URL: postgresql://memory:memory@localhost:5435/memory_test
+        run: make test

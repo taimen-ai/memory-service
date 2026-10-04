@@ -45,7 +45,7 @@ def _has_writer_column(conn, settings) -> bool:
 def reader(settings, stores):
     """Соединение-читатель без autocommit: первый SELECT открывает долгую транзакцию."""
     conn = dbmod.connect(settings, autocommit=False)
-    conn.commit()  # prepare_age открыл транзакцию — закрыть до DDL теста
+    conn.commit()  # транзакции ещё нет; commit — на случай, если подключение её откроет
     yield conn
     conn.close()
 

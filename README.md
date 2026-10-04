@@ -6,7 +6,7 @@ Product-neutral **Context Memory Engine** for AI applications:
 observe → normalize → retain → consolidate → retrieve → assemble context → provide provenance
 ```
 
-A typed knowledge graph (Apache AGE) with **temporal facts**, first-class
+A typed knowledge graph (plain PostgreSQL tables, MEM-ADR-023) with **temporal facts**, first-class
 **observations** (immutable evidence with idempotent ingest), vector + lexical +
 graph **hybrid retrieval** over a document vault, and a **Context Compiler** that
 assembles a token-budgeted, provenance-rich `ContextPack` for any LLM/harness/agent —
@@ -16,9 +16,9 @@ External systems (issue trackers, CRM, email, coding harnesses, agent runtimes)
 talk to one generic Memory API; domain-specific adapters live outside this package.
 Conceptual model: [`docs/context-engine.md`](./docs/context-engine.md).
 
-> **Isolation invariant (CLAUDE.md, invariant 1).** This package is licence- and
+> **Isolation invariant (AGENTS.md, invariant 1).** This package is licence- and
 > dependency-isolated. The memory engine never imports another `platform_*` package and
-> keeps its own config (`CB_*`), its own `psycopg3 + AGE + pgvector` data layer and its
+> keeps its own config (`CB_*`), its own `psycopg3 + PostgreSQL + pgvector` data layer and its
 > own `openai` LLM/embeddings client, so this repository (Apache-2.0 `LICENSE` +
 > `THIRD_PARTY.md`) builds, tests and ships on its own.
 >
@@ -31,8 +31,11 @@ Conceptual model: [`docs/context-engine.md`](./docs/context-engine.md).
 ## Requirements
 
 - Python ≥ 3.12
-- PostgreSQL 16 with **Apache AGE** and **pgvector** extensions
-  (local image: `infra/memory-db/Dockerfile` → `memory-db`)
+- PostgreSQL 16 with the **pgvector** extension (`pg_trgm` recommended) — e.g. the
+  official `pgvector/pgvector:pg16` image. The graph lives in ordinary tables
+  (MEM-ADR-023); no graph extension and no superuser are needed: the service runs as
+  the owner of its database, and the extensions are created by a database setup step
+  (`CREATE EXTENSION vector; CREATE EXTENSION pg_trgm;`), not by the service.
 - An OpenAI-compatible endpoint for embeddings and (optionally) LLM synthesis —
   offline `fake`/`echo` providers are available for tests and air-gapped runs.
 
@@ -52,8 +55,8 @@ The essentials:
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `CB_DATABASE_URL` | `postgresql://brain:brain@localhost:5432/company_brain` | or set `POSTGRES_*` parts |
-| `CB_GRAPH_NAME` | `company_brain` | AGE graph name |
-| `CB_DB_JIT` | `false` | PostgreSQL JIT for service connections. Off by default: AGE's bogus cost estimates make LLVM recompile every graph query (8–12x slower traversals). See ADR-010. |
+| `CB_GRAPH_NAME` | `company_brain` | PostgreSQL schema of the graph tables (`graph_nodes`, `graph_edges`) |
+| `CB_DB_JIT` | `false` | PostgreSQL JIT for service connections. Off by default since the Apache AGE era, when bogus cost estimates made LLVM recompile every graph query (ADR-010); whether it is still needed on the graph tables is decided by the MEM-ADR-023 benchmark. |
 | `CB_EMBEDDING_PROVIDER` | `openai` | `openai` (needs `CB_EMBEDDING_API_KEY`) or `fake` |
 | `CB_EMBEDDING_API_KEY` | — | required unless provider is `fake` |
 | `CB_LLM_PROVIDER` | `openai` | `openai` (needs `CB_LLM_API_KEY`) or `echo` (offline) |
@@ -133,7 +136,7 @@ plus the context engine: `Observation`, `ObservationStore`, `FactStore`,
 ## CLI
 
 ```bash
-cb init-db                       # create the AGE graph + all tables (idempotent)
+cb init-db                       # create the graph schema + all tables (idempotent)
 cb ingest --vault ./vault        # project a vault into graph + index
 cb communities                   # Leiden/Louvain community detection + LLM labels
 cb query "who owns billing?"     # ask a question, get an answer with citations
@@ -148,6 +151,9 @@ cb redrive-legacy --writer-scope workspace:w1 --dry-run   # list pre-writer-visi
                                  # observations with source.system — check it first
 cb redrive-legacy --writer-scope workspace:w1   # redrive them (or --unrestricted /
                                  # --namespace-level); audited, MEM-ADR-019
+cb migrate-graph-from-age --dry-run   # graph still in Apache AGE: preview the move
+cb migrate-graph-from-age        # copy AGE graph into graph tables (MEM-ADR-023, idempotent;
+                                 # per-namespace reconciliation, exit 1 on mismatch)
 ```
 
 (`platform-memory-serve` runs the HTTP service; `cb`/`platform-memory-*` aliases are equivalent.)
@@ -288,7 +294,7 @@ loopback address (`127.0.0.1`, `::1`, `localhost`); any other `--host` without
 ## Deployment
 
 `deploy/` contains a reproducible isolated-instance setup (one customer = one
-instance): `docker-compose.yml` (service + dedicated AGE/pgvector database),
+instance): `docker-compose.yml` (service + dedicated PostgreSQL database),
 `.env.example`, an end-to-end `smoke-test.sh` that runs fully offline on the
 `fake`/`echo` providers, and `RUNBOOK.md` (reverse proxy requirements, backup /
 restore, upgrade).
@@ -301,13 +307,15 @@ uv run pytest tests/ -q    # unit tests, no external services required
 uv run ruff check . && uv run ruff format --check .
 ```
 
-Integration tests (real AGE+pgvector, offline fake/echo providers) and the
-benchmark suite need a throwaway database:
+Integration tests (real PostgreSQL + pgvector, offline fake/echo providers) and the
+benchmark suite need a throwaway database (an ordinary, non-superuser role is enough
+once the extensions exist):
 
 ```bash
-docker build -t memory-db infra/memory-db/
 docker run -d --name memtest-db -e POSTGRES_USER=brain -e POSTGRES_PASSWORD=brain \
-  -e POSTGRES_DB=company_brain -p 127.0.0.1:5435:5432 memory-db
+  -e POSTGRES_DB=company_brain -p 127.0.0.1:5435:5432 pgvector/pgvector:pg16
+docker exec memtest-db psql -U brain -d company_brain \
+  -c 'CREATE EXTENSION IF NOT EXISTS vector' -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
 CB_TEST_DATABASE_URL=postgresql://brain:brain@127.0.0.1:5435/company_brain \
   uv run pytest tests/ -q                      # unit + integration + E2E DoD scenario
 CB_TEST_DATABASE_URL=postgresql://brain:brain@127.0.0.1:5435/company_brain \

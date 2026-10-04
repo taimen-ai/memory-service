@@ -1,7 +1,7 @@
 # Адаптировано из graphify/cluster.py (https://github.com/safishamsi/graphify), MIT License.
 # Copyright (c) 2026 Safi Shamsi. See THIRD_PARTY.md for the full license text.
 # Алгоритм перенесён практически дословно — он работает над произвольным networkx-графом
-# и не зависит от модели данных graphify; нужен лишь для проекции нашего AGE-графа.
+# и не зависит от модели данных graphify; нужен лишь для проекции нашего графа памяти.
 """Детекция сообществ на NetworkX-графе: Leiden (graspologic) с fallback на Louvain.
 
 Дробит слишком крупные сообщества, считает cohesion-скоры, умеет переиндексировать

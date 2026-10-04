@@ -1,10 +1,10 @@
-"""Проекция AGE-графа Company Brain в NetworkX для кластеризации и анализа.
+"""Проекция графа памяти в NetworkX для кластеризации и анализа.
 
 cluster.py и analyze.py (вендорено из graphify) работают над ``networkx``-графом. Этот
-модуль строит такую проекцию из нашего AGE-store: id узла = natural_key, атрибуты
+модуль строит такую проекцию из GraphStore (таблицы ``graph_nodes``/``graph_edges``): id узла = natural_key, атрибуты
 ``label`` (title), ``type``, ``source_file`` (source_path). Рёбра направленные
 (тип связи в ``relation``). NetworkX-граф — эфемерная проекция только для чтения;
-источник истины остаётся в AGE.
+источник истины остаётся в таблицах графа.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def to_networkx(
     namespaces: Sequence[str] | None = None,
     allowed_scopes: Sequence[str] | None = None,
 ) -> nx.DiGraph | nx.Graph:
-    """Спроецировать граф из AGE в NetworkX (весь или в пределах namespaces).
+    """Спроецировать граф из таблиц графа в NetworkX (весь или в пределах namespaces).
 
     Атрибуты узла подгоняются под ожидания vendored-кода graphify (``label``,
     ``source_file``), плюс ``type`` и сырые ``props``. Рёбра несут ``relation``

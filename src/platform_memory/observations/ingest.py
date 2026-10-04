@@ -317,7 +317,7 @@ def _open_stores(
     graph = GraphStore(conn, settings.graph_name, settings.default_namespace)
     attach_kind_guard(graph, settings)  # строгий режим видов namespace (MEM-ADR-020)
     # Граф обязан существовать до проекции assertions: первый вызов API может
-    # прийти раньше init-db (дёшево: один SELECT в ag_catalog + create при нужде).
+    # прийти раньше init-db (дёшево: одна проверка каталога + create при нужде).
     dbmod.ensure_graph(conn, graph.graph)
     facts = FactStore(graph)
     index = VectorIndex(

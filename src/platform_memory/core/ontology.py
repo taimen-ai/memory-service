@@ -1,4 +1,4 @@
-"""Онтология Company Brain: виды по умолчанию, natural-id resolver, утилиты для AGE-меток.
+"""Онтология Company Brain: виды по умолчанию, natural-id resolver, утилиты для меток графа.
 
 Виды и шаблоны идентификаторов — данные, а не код (MEM-ADR-020; TAI-ADR-0042): бизнес-
 онтология vault лежит пакетом по умолчанию ``core/packs/default.json`` (соответствует
@@ -42,13 +42,13 @@ def id_type(token: str, catalog: KindCatalog | None = None) -> str | None:
     return (catalog or default_catalog()).id_kind(token.strip())
 
 
-# Допустимые символы AGE-метки (vertex label): начинается с буквы/_, далее буквы/цифры/_.
+# Допустимые символы метки графа (вид узла, тип ребра): начинается с буквы/_, далее буквы/цифры/_.
 _LABEL_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _LABEL_CLEAN = re.compile(r"[^A-Za-z0-9_]")
 
 
 def sanitize_label(entity_type: str | None) -> str:
-    """Привести entity_type к валидной AGE-метке. Неизвестное/пустое -> 'entity'."""
+    """Привести entity_type к валидной метке графа. Неизвестное/пустое -> 'entity'."""
     if not entity_type:
         return "entity"
     label = entity_type.strip()

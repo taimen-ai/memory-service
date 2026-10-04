@@ -9,7 +9,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Aleksandr Pereboev" }]
 keywords = ["knowledge-graph", "rag", "apache-age", "pgvector", "retrieval", "memory"]
 # ISOLATION INVARIANT: no `platform-*` deps here, no infrastructure of other platform
-# services. Own config (CB_*, pydantic-settings), own DB driver (psycopg3 + AGE + pgvector),
+# services. Own config (CB_*, pydantic-settings), own DB driver (psycopg3 + PostgreSQL + pgvector),
 # own LLM/embeddings layer (openai directly).
 # The ONE deliberate exception (ADR-018; superproject ADR-0013/0030): `platform-auth-sdk`,
 # the shared enforcement SDK (separate repository, Apache-2.0) every resource service uses
@@ -65,9 +65,9 @@ packages = ["src/platform_memory"]
 constraint-dependencies = ["cryptography>=50.0.0", "pyjwt>=2.14"]
 
 [tool.uv.sources]
-# Общий enforcement SDK — соседний репозиторий суперпроекта (ADR-0013/0030): поэтому
+# Общий enforcement SDK — репозиторий суперпроекта в sdk/ (ADR-0013/0030, TAI-ADR-0064): поэтому
 # контекст docker build — корень суперпроекта, а не каталог сервиса (см. Dockerfile).
-platform-auth-sdk = { path = "../platform-auth-sdk", editable = true }
+platform-auth-sdk = { path = "../../sdk/platform-auth-sdk", editable = true }
 # Клиент сервиса (client/) — отдельный дистрибутив; сервису он нужен только для
 # тестов клиента (tests/client), потребители подключают ../memory-service/client.
 platform-memory-client = { path = "client", editable = true }
@@ -86,7 +86,7 @@ dev = [
 testpaths = ["tests"]
 markers = [
     "unit: юнит-тесты без внешних сервисов (БД не требуется)",
-    "integration: тесты на реальной БД (AGE+pgvector); скипаются без CB_TEST_DATABASE_URL",
+    "integration: тесты на реальной БД (PostgreSQL+pgvector); скипаются без CB_TEST_DATABASE_URL",
 ]
 
 [tool.ruff]

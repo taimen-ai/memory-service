@@ -1,19 +1,20 @@
-"""Шаг typed-обхода на настоящем AGE: валидность рёбер до лимита чтения (ревью 367 п.1).
+"""Шаг typed-обхода на таблицах графа: валидность рёбер до лимита чтения (ревью 367 п.1).
 
-Рёбра фронта читаются из таблицы метки связи с лимитом (``typed_neighbors``,
+Рёбра фронта читаются по индексам концов с лимитом (``typed_neighbors``,
 ``max_edges``). Валидность на ``as_of``, ``evidence_lost`` и namespace ребра
 проверяются в SQL до лимита: у хаба, накопившего за сверки закрытые версии рёбер с
 меньшими id, действующие рёбра не вытесняются. Здесь же — псевдоним узла только в
-графе (без журнала) и индексы концов рёбер.
+графе (без журнала) и индексы концов рёбер (MEM-ADR-023).
 """
 
 from __future__ import annotations
 
 import pytest
 
+from psycopg.types.json import Jsonb
+
 from platform_memory.context.typed import compile_typed_context
-from platform_memory.core.db import agtype
-from platform_memory.graph import store as store_mod
+from platform_memory.core.models import Node
 from platform_memory.graph.store import GraphStore
 
 pytestmark = pytest.mark.integration
@@ -23,11 +24,34 @@ OTHER = "tenant:t1:ws:other"
 CLOSED = 30
 
 
-def _cypher(conn, graph: str, query: str, params: dict) -> None:
-    with conn.cursor() as cur:
+def _node(graph: GraphStore, label: str, key: str, ns: str = NS) -> int:
+    """Узел напрямую строкой таблицы (как его оставила бы прежняя запись); вернуть id."""
+    with graph.conn.cursor() as cur:
         cur.execute(
-            f"SELECT * FROM cypher('{graph}', $$ {query} $$, %s) AS (v agtype)",
-            (agtype(params),),
+            graph.sql(
+                "INSERT INTO {N} (namespace, label, natural_key, type, props) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id"
+            ),
+            (ns, label, key, label, Jsonb({"title": key})),
+        )
+        return int(cur.fetchone()[0])
+
+
+def _fact(graph: GraphStore, src: int, dst: int, fid: str, ns: str = NS, **cols) -> None:
+    """Ребро-факт PART_OF строкой таблицы: ``cols`` — valid_from/valid_to/evidence_lost."""
+    cols = {"valid_from": "2026-01-01T00:00:00Z", **cols}
+    names = ", ".join(cols)
+    marks = ", ".join(["%s"] * len(cols))
+    with graph.conn.cursor() as cur:
+        cur.execute(
+            graph.sql(
+                "INSERT INTO {E} (namespace, type, src_id, dst_id, fact_id, observation_ids, "
+                + names
+                + ") VALUES (%s, 'PART_OF', %s, %s, %s, ARRAY[]::text[], "
+                + marks
+                + ")"
+            ),
+            (ns, src, dst, fid, *cols.values()),
         )
 
 
@@ -39,39 +63,19 @@ def hub(stores):
     namespace другой базы.
     """
     conn, graph, _, _, _ = stores
-    g = graph.graph
-    _cypher(
-        conn,
-        g,
-        "CREATE (:component {natural_key: 'hub', namespace: $ns, type: 'component', "
-        "title: 'hub'}) RETURN 1",
-        {"ns": NS},
-    )
-
-    def edges(prefix: str, n: int, extra: str) -> None:
-        _cypher(
-            conn,
-            g,
-            "MATCH (h:component {natural_key: 'hub', namespace: $ns}) "
-            "UNWIND range(1, $n) AS i "
-            f"CREATE (f:source_file {{natural_key: '{prefix}' + toString(i), namespace: $ns, "
-            f"type: 'source_file', title: '{prefix}' + toString(i)}})"
-            f"-[:PART_OF {{fact_id: '{prefix}' + toString(i), namespace: $ns, "
-            f"valid_from: '2026-01-01T00:00:00Z'{extra}}}]->(h) RETURN 1",
-            {"ns": NS, "n": n},
+    hub_id = _node(graph, "component", "hub")
+    for i in range(1, CLOSED + 1):
+        _fact(
+            graph,
+            _node(graph, "source_file", f"old{i}"),
+            hub_id,
+            f"old{i}",
+            valid_to="2026-02-01T00:00:00Z",
         )
-
-    edges("old", CLOSED, ", valid_to: '2026-02-01T00:00:00Z'")
-    edges("live", 3, "")
-    edges("lost", 1, ", evidence_lost: true")
-    _cypher(
-        conn,
-        g,
-        "MATCH (h:component {natural_key: 'hub', namespace: $ns}) "
-        "CREATE (:source_file {natural_key: 'alien', namespace: $ns, type: 'source_file'})"
-        "-[:PART_OF {fact_id: 'alien', namespace: $other}]->(h) RETURN 1",
-        {"ns": NS, "other": OTHER},
-    )
+    for i in range(1, 4):
+        _fact(graph, _node(graph, "source_file", f"live{i}"), hub_id, f"live{i}")
+    _fact(graph, _node(graph, "source_file", "lost1"), hub_id, "lost1", evidence_lost=True)
+    _fact(graph, _node(graph, "source_file", "alien"), hub_id, "alien", ns=OTHER)
     return conn, graph
 
 
@@ -129,23 +133,19 @@ def test_typed_context_step_reports_truncation(hub, settings, monkeypatch):
     assert step["reached"] == 5 and step["truncated"] is True
 
 
-def test_graph_only_alias_resolves_in_age(stores, settings):
-    """Псевдоним узла без журнала (props.aliases) — совпадение в настоящем AGE (ревью 367 п.4)."""
+def test_graph_only_alias_resolves_in_graph(stores, settings):
+    """Псевдоним узла без журнала (props.aliases) — совпадение в графе (ревью 367 п.4)."""
     conn, graph, _, _, _ = stores
-    _cypher(
-        conn,
-        graph.graph,
-        "CREATE (:note {natural_key: 'note:payment-bug', namespace: $ns, type: 'note', "
-        "title: 'payment bug', props: {aliases: ['payment-bug-alias']}}) RETURN 1",
-        {"ns": NS},
-    )
-    _cypher(
-        conn,
-        graph.graph,
-        "CREATE (:note {natural_key: 'note:elsewhere', namespace: $other, type: 'note', "
-        "title: 'x', props: {aliases: ['payment-bug-alias']}}) RETURN 1",
-        {"other": OTHER},
-    )
+    for key, ns in (("note:payment-bug", NS), ("note:elsewhere", OTHER)):
+        graph.upsert_node(
+            Node(
+                type="note",
+                natural_key=key,
+                title=key,
+                properties={"aliases": ["payment-bug-alias"]},
+                namespace=ns,
+            )
+        )
     for anchor in ({"value": "payment-bug-alias"}, {"kind": "note", "value": "payment-bug-alias"}):
         pack = compile_typed_context(settings, {"namespaces": [NS], "anchors": [anchor]}, conn=conn)
         (out,) = pack["anchors"]
@@ -153,15 +153,14 @@ def test_graph_only_alias_resolves_in_age(stores, settings):
         assert [r["natural_key"] for r in out["resolved"]] == ["note:payment-bug"]
 
 
-def test_edge_label_gets_endpoint_indexes(stores):
+def test_edge_endpoints_are_indexed_by_type(stores):
+    """Шаг обхода выбирает рёбра фронта по индексам концов, без просмотра таблицы рёбер."""
     conn, graph, _, _, _ = stores
-    assert graph.ensure_label_index("PART_OF", edge=True)
-    names = store_mod._label_index_names("PART_OF", edge=True)
-    assert names == ["PART_OF_pm_props_gin", "PART_OF_pm_start", "PART_OF_pm_end"]
     with conn.cursor() as cur:
         cur.execute(
             "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = %s AND tablename = %s",
-            (graph.graph, "PART_OF"),
+            (graph.graph, "graph_edges"),
         )
         defs = dict(cur.fetchall())
-    assert "(start_id)" in defs["PART_OF_pm_start"] and "(end_id)" in defs["PART_OF_pm_end"]
+    assert "(src_id, type)" in defs["graph_edges_src"]
+    assert "(dst_id, type)" in defs["graph_edges_dst"]

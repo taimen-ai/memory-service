@@ -1,13 +1,13 @@
 """platform_memory — product-neutral memory engine for the Taimen platform.
 
-Typed knowledge graph (Apache AGE) + vector retrieval (pgvector) over a document
+Typed knowledge graph (PostgreSQL tables) + vector retrieval (pgvector) over a document
 vault, exposed via HTTP (``/api/brain/*``), MCP and CLI.
 
 ISOLATION INVARIANT: this package is licence- and dependency-isolated. It MUST NOT
 import any other ``platform_*`` package and MUST NOT depend on the infrastructure of
 other platform services (shared LLM layers, external vector stores,
 asyncpg/SQLAlchemy/Alembic). It keeps its own config (``CB_*``), its own psycopg3 +
-AGE + pgvector data layer and its own ``openai`` LLM/embeddings client, so the whole
+PostgreSQL + pgvector data layer and its own ``openai`` LLM/embeddings client, so the whole
 repository (with its own LICENSE + THIRD_PARTY.md) builds and runs on its own.
 
 Public API

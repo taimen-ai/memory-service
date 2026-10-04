@@ -163,14 +163,15 @@ def _snapshot(repo: str, idx: int, scale: int) -> dict:
 def _noise(graph: GraphStore, conn, n: int) -> None:
     """Узлы другого namespace (граф общий): typed-запросы не должны их сканировать."""
     with conn.cursor() as cur:
-        for start in range(0, n, 5000):
-            rows = [{"k": f"doc:{i}", "ns": NOISE_NS} for i in range(start, min(n, start + 5000))]
-            cur.execute(
-                f"SELECT * FROM cypher('{graph.graph}', $$ UNWIND $rows AS r "
-                "CREATE (:document {natural_key: r.k, namespace: r.ns, type: 'document', "
-                "props: {aliases: []}}) $$, %s) AS (v agtype)",
-                (dbmod.agtype({"rows": rows}),),
-            )
+        cur.execute(
+            graph.sql(
+                "INSERT INTO {N} (namespace, label, natural_key, type, props) "
+                "SELECT %s, 'document', 'doc:' || i, 'document', "
+                "jsonb_build_object('props', jsonb_build_object('aliases', jsonb_build_array())) "
+                "FROM generate_series(0, %s) i"
+            ),
+            (NOISE_NS, n - 1),
+        )
 
 
 PROFILES = {
@@ -234,7 +235,8 @@ def main() -> None:
             reconcile(settings, snapshot=_snapshot(repo, i, args.scale), namespace=NS, conn=conn)
         _noise(graph, conn, args.noise)
         with conn.cursor() as cur:
-            cur.execute(f'ANALYZE "{graph.graph}"._ag_label_vertex')
+            cur.execute(graph.sql("ANALYZE {N}"))
+            cur.execute(graph.sql("ANALYZE {E}"))
         report["load_s"] = round(time.monotonic() - t0, 1)
         report["graph"] = {
             "nodes": graph.count_nodes_by_type([NS]),

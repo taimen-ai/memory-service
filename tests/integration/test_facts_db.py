@@ -1,4 +1,4 @@
-"""Temporal-факты на реальной AGE: creation, supersession, история, конфликты."""
+"""Temporal-факты на реальной БД (таблицы графа): creation, supersession, история, конфликты."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Канал resolve компилятора на живом AGE (MEM-ADR-020, амендмент «канал resolve»).
+"""Канал resolve компилятора на живой БД (MEM-ADR-020, амендмент «канал resolve»).
 
 Снимок-фикстура software-delivery (``tests/fixtures/software_delivery``) плюс сущности
 целей (эндпоинты goals, событие ``goal.created``, ADR ``CP-0062``) сверяются в

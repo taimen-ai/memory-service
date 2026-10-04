@@ -1,6 +1,6 @@
-"""FactStore — temporal-факты с supersession поверх графа AGE (ADR-016 §4).
+"""FactStore — temporal-факты с supersession поверх графа памяти (ADR-016 §4).
 
-Факт — ребро с уникальным ``fact_id``: несколько рёбер одного типа между одной
+Факт — ребро ``graph_edges`` с ``fact_id``, уникальным в namespace (MEM-ADR-023): несколько рёбер одного типа между одной
 парой узлов сосуществуют, различаясь validity-интервалами. Историю не удаляем:
 supersession закрывает ``valid_to`` старого факта и связывает его с новым через
 ``superseded_by``. Времена — строки ISO-8601 UTC (лексикографически сравнимы).
@@ -17,9 +17,9 @@ from collections.abc import Sequence
 from typing import Any
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from platform_memory.core import db as dbmod
-from platform_memory.core.db import agtype
 from platform_memory.core.models import Node, Provenance
 from platform_memory.core.namespaces import resolve_namespace, resolve_namespaces
 from platform_memory.core.observations import EVIDENCE_ASSERTED, EVIDENCE_CLASSES
@@ -30,7 +30,7 @@ from platform_memory.core.scopes import (
     is_visible,
     merge_scopes,
 )
-from platform_memory.graph.store import GraphStore
+from platform_memory.graph.store import GraphStore, edge_json, set_props
 
 # Ранг силы свидетельства для ranking/конфликтов (больше — сильнее).
 EVIDENCE_RANK = {"asserted": 3, "extracted": 2, "inferred": 1, "derived": 1}
@@ -129,6 +129,9 @@ class FactStore:
 
     # --- запись фактов ---
 
+    # Ключи ``props`` факта, которые пишет assert_fact (``scopes`` — только когда заданы).
+    _ASSERT_KEYS = ("observed_at", "evidence", "confidence", "supersedes", "source_path", "origin")
+
     def assert_fact(
         self,
         subject: str,
@@ -159,6 +162,10 @@ class FactStore:
         видимости записи — только из неё; scopes повторённого факта сливаются
         (:func:`merge_scopes`), а не заменяются. Невидимый ``supersedes`` не
         закрывается — как отсутствующий.
+
+        Новый факт вставляется ``INSERT … ON CONFLICT DO NOTHING``; повтор читается под
+        блокировкой строки (``FOR UPDATE``) и сливается — параллельные подтверждения
+        одного факта не теряют ``observation_ids`` друг друга.
         """
         if evidence not in EVIDENCE_CLASSES:
             raise ValueError(f"Неизвестный класс свидетельства {evidence!r}")
@@ -169,68 +176,86 @@ class FactStore:
         valid_from = normalize_ts(valid_from) or ""
         valid_to = normalize_ts(valid_to)
         etype = sanitize_label(predicate).upper()
+        dbmod.check_graph_key(label=etype)
         fid = fact_id_for(ns, subject, predicate, obj, valid_from)
         confidence = max(0.0, min(1.0, float(confidence)))
 
         check_write_scopes(scopes, allowed_scopes)
-        params: dict[str, Any] = {
-            "src": subject,
-            "dst": obj,
-            "ns": ns,
-            "fid": fid,
-            "observed": observed_at or _now_iso(),
-            "vf": valid_from,
-            "vt": valid_to,
-            "ev": evidence,
-            "conf": confidence,
-            "obs": [observation_id] if observation_id else [],
-            "sup": supersedes or None,
-            "sp": source_path or "memory:observation",
+        observed = observed_at or _now_iso()
+        values: dict[str, Any] = {
+            "observed_at": observed,
+            "evidence": evidence,
+            "confidence": confidence,
+            "supersedes": supersedes or None,
+            "source_path": source_path or "memory:observation",
+            "origin": "agent",
         }
-        sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"MATCH (a {{natural_key: $src, namespace: $ns}}), "
-            f"(b {{natural_key: $dst, namespace: $ns}}) "
-            f"MERGE (a)-[r:{etype} {{fact_id: $fid}}]->(b) "
-            f"SET r.namespace=$ns, r.observed_at=$observed, r.valid_from=$vf, r.valid_to=$vt, "
-            f"r.evidence=$ev, r.confidence=$conf, r.observation_ids=$obs, r.supersedes=$sup, "
-            f"r.source_path=$sp, r.origin='agent' "
-            f"RETURN id(r) $$, %s) AS (id agtype)"
-        )
+        obs_ids = [observation_id] if observation_id else []
         superseded = False
+        existing: dict[str, Any] | None = None
         with self.conn.transaction():
-            # Advisory-лок сериализует конкурентные MERGE того же факта (гонки AGE).
-            with self.conn.cursor() as cur:
-                cur.execute(
-                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                    (f"{self.graph}:fact:{fid}",),
-                )
             for key in (subject, obj):
                 if not self.store.key_visible(key, ns, allowed_scopes):
                     raise ForeignObjectError(key)
-            # Существующий факт читается под локом: проверка и слияние без гонки.
-            existing = self.get_fact(fid, namespaces=[ns])
-            if existing:
+            patch, _ = set_props({**values, "scopes": list(scopes) or None})
+            created = self.store._all(
+                "INSERT INTO {E} (namespace, type, src_id, dst_id, fact_id, observation_ids, "
+                "valid_from, valid_to, props) "
+                "SELECT %(ns)s, %(type)s, a.id, b.id, %(fid)s, %(obs)s::text[], %(vf)s, %(vt)s, "
+                "%(patch)s FROM {N} a "
+                "JOIN {N} b ON b.namespace = a.namespace AND b.natural_key = %(dst)s "
+                "WHERE a.namespace = %(ns)s AND a.natural_key = %(src)s "
+                "ORDER BY a.id, b.id LIMIT 1 "
+                "ON CONFLICT (namespace, fact_id) WHERE fact_id IS NOT NULL DO NOTHING "
+                "RETURNING id",
+                {
+                    "ns": ns,
+                    "type": etype,
+                    "fid": fid,
+                    "obs": obs_ids,
+                    "vf": valid_from,
+                    "vt": valid_to,
+                    "patch": patch,
+                    "src": subject,
+                    "dst": obj,
+                },
+            )
+            if not created:
+                found = self._select_facts(
+                    "e.namespace = %(ns)s AND e.fact_id = %(fid)s",
+                    {"ns": ns, "fid": fid},
+                    lock=True,
+                )
+                if not found:
+                    raise ValueError(
+                        f"Концы факта не найдены в namespace {ns!r}: {subject!r} -> {obj!r}"
+                    )
+                existing = found[0]
                 if not is_visible(_fact_scopes(existing), allowed_scopes):
                     raise ForeignObjectError(fid)
                 # Reinforcement: тот же факт из нового наблюдения (ADR-016 §26).
-                obs_ids = list(existing.get("observation_ids") or [])
-                if observation_id and observation_id not in obs_ids:
-                    obs_ids.append(observation_id)
-                params["obs"] = obs_ids
-                params["conf"] = max(float(existing.get("confidence") or 0.0), confidence)
-                scopes = merge_scopes(_fact_scopes(existing), scopes)
-            if scopes:
-                params["scopes"] = list(scopes)
-                scope_sql = sql.replace("r.origin='agent' ", "r.origin='agent', r.scopes=$scopes ")
-            else:
-                scope_sql = sql
-            with self.conn.cursor() as cur:
-                cur.execute(scope_sql, (agtype(params),))
-                row = cur.fetchone()
-            if row is None:
-                raise ValueError(
-                    f"Концы факта не найдены в namespace {ns!r}: {subject!r} -> {obj!r}"
+                merged_obs = list(existing.get("observation_ids") or [])
+                if observation_id and observation_id not in merged_obs:
+                    merged_obs.append(observation_id)
+                values["confidence"] = max(float(existing.get("confidence") or 0.0), confidence)
+                merged_scopes = merge_scopes(_fact_scopes(existing), scopes)
+                if merged_scopes:
+                    values["scopes"] = list(merged_scopes)
+                patch, keys = set_props(values)
+                self.store._run(
+                    "UPDATE {E} e SET valid_from = %(vf)s, valid_to = %(vt)s, "
+                    "observation_ids = %(obs)s::text[], "
+                    "props = (e.props - %(keys)s::text[]) || %(patch)s "
+                    "WHERE e.namespace = %(ns)s AND e.fact_id = %(fid)s",
+                    {
+                        "vf": valid_from,
+                        "vt": valid_to,
+                        "obs": merged_obs,
+                        "keys": keys,
+                        "patch": patch,
+                        "ns": ns,
+                        "fid": fid,
+                    },
                 )
             if (
                 supersedes
@@ -240,7 +265,7 @@ class FactStore:
                 superseded = self._close_fact(
                     supersedes,
                     ns,
-                    valid_to=valid_from or params["observed"],
+                    valid_to=valid_from or observed,
                     superseded_by=fid,
                 )
         return {"fact_id": fid, "reinforced": bool(existing), "superseded": superseded}
@@ -264,81 +289,94 @@ class FactStore:
         namespace: str,
         observed_at: str,
     ) -> set[str]:
-        """Создать рёбра-факты одной связи между узлами заданных видов (UNWIND).
+        """Создать рёбра-факты одной связи между узлами заданных видов одним запросом.
 
         ``rows`` — ``{fid, s, d, vf, sup, sp, a, src, scope, sid, scopes}``: концы,
         fact_id, ``valid_from``, supersedes, source_path, атрибуты связи, снимок-источник
         и scopes видимости (MEM-ADR-019).
         fact_id у сверки уникален для версии (включает источник и снимок), поэтому
-        ребро создаётся (CREATE), а не сливается: закрытое ребро не переоткрывается.
-        Вернуть множество созданных fact_id (конец не найден — ребра нет).
+        ребро создаётся, а не сливается: закрытое ребро не переоткрывается, уже
+        существующий fact_id не перезаписывается. Вернуть множество созданных fact_id
+        (конец не найден — ребра нет).
         """
         if not rows:
             return set()
-        ns = self._ns(namespace)
         etype = sanitize_label(relation).upper()
-        la, lb = sanitize_label(from_kind), sanitize_label(to_kind)
-        self.store.ensure_label_index(etype, edge=True)
-        params: dict[str, Any] = {
-            "rows": list(rows),
-            "ns": ns,
-            "obs": normalize_ts(observed_at) or _now_iso(),
-        }
-        sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"UNWIND $rows AS row "
-            f"MATCH (a:{la} {{natural_key: row.s, namespace: $ns}}), "
-            f"(b:{lb} {{natural_key: row.d, namespace: $ns}}) "
-            f"CREATE (a)-[r:{etype} {{fact_id: row.fid}}]->(b) "
-            f"SET r.namespace=$ns, r.observed_at=$obs, r.valid_from=row.vf, "
-            f"r.evidence='asserted', r.confidence=1.0, r.observation_ids=[], "
-            f"r.supersedes=row.sup, r.source_path=row.sp, r.origin='agent', "
-            f"r.attributes=row.a, r.snapshot_source=row.src, r.snapshot_scope=row.scope, "
-            f"r.snapshot_id=row.sid, r.scopes=row.scopes "
-            f"RETURN r.fact_id $$, %s) AS (fid agtype)"
+        dbmod.check_graph_key(label=etype)
+        ns = self._ns(namespace)
+        obs = normalize_ts(observed_at) or _now_iso()
+        items = []
+        for r in rows:
+            patch, _ = set_props(
+                {
+                    "observed_at": obs,
+                    "evidence": "asserted",
+                    "confidence": 1.0,
+                    "supersedes": r.get("sup"),
+                    "source_path": r.get("sp"),
+                    "origin": "agent",
+                    "attributes": r.get("a"),
+                    "snapshot_source": r.get("src"),
+                    "snapshot_scope": r.get("scope"),
+                    "snapshot_id": r.get("sid"),
+                    "scopes": r.get("scopes"),
+                }
+            )
+            items.append(
+                {"fid": r["fid"], "s": r["s"], "d": r["d"], "vf": r.get("vf"), "patch": patch.obj}
+            )
+        got = self.store._all(
+            "INSERT INTO {E} (namespace, type, src_id, dst_id, fact_id, observation_ids, "
+            "valid_from, props) "
+            "SELECT %(ns)s, %(type)s, a.id, b.id, r.fid, ARRAY[]::text[], r.vf, r.patch "
+            "FROM jsonb_to_recordset(%(rows)s) AS r(fid text, s text, d text, vf text, patch jsonb) "
+            "JOIN {N} a ON a.namespace = %(ns)s AND a.label = %(la)s AND a.natural_key = r.s "
+            "JOIN {N} b ON b.namespace = %(ns)s AND b.label = %(lb)s AND b.natural_key = r.d "
+            "ON CONFLICT (namespace, fact_id) WHERE fact_id IS NOT NULL DO NOTHING "
+            "RETURNING fact_id",
+            {
+                "ns": ns,
+                "type": etype,
+                "la": sanitize_label(from_kind),
+                "lb": sanitize_label(to_kind),
+                "rows": Jsonb(items),
+            },
         )
-        with self.conn.cursor() as cur:
-            cur.execute(sql, (agtype(params),))
-            got = cur.fetchall()
-        return {str(dbmod.parse_agtype(r[0])) for r in got}
+        return {str(r[0]) for r in got}
 
     def close_facts(self, relation: str, rows: Sequence[dict[str, Any]], *, namespace: str) -> int:
-        """Закрыть рёбра-факты одной связи (UNWIND): ``rows`` — ``{fid, vt, nxt}``."""
+        """Закрыть рёбра-факты одной связи одним запросом: ``rows`` — ``{fid, vt, nxt}``."""
         if not rows:
             return 0
-        etype = sanitize_label(relation).upper()
-        params: dict[str, Any] = {"rows": list(rows), "ns": self._ns(namespace)}
-        sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"UNWIND $rows AS row "
-            f"MATCH ()-[r:{etype} {{fact_id: row.fid, namespace: $ns}}]->() "
-            f"SET r.valid_to = row.vt, r.superseded_by = row.nxt "
-            f"RETURN count(r) $$, %s) AS (c agtype)"
+        items = [{"fid": r.get("fid"), "vt": r.get("vt"), "nxt": r.get("nxt")} for r in rows]
+        return self.store._run(
+            "UPDATE {E} e SET valid_to = r.vt, props = (e.props - 'superseded_by'::text) "
+            "|| jsonb_strip_nulls(jsonb_build_object('superseded_by', r.nxt)) "
+            "FROM jsonb_to_recordset(%(rows)s) AS r(fid text, vt text, nxt text) "
+            "WHERE e.namespace = %(ns)s AND e.type = %(type)s AND e.fact_id = r.fid",
+            {
+                "rows": Jsonb(items),
+                "ns": self._ns(namespace),
+                "type": sanitize_label(relation).upper(),
+            },
         )
-        with self.conn.cursor() as cur:
-            cur.execute(sql, (agtype(params),))
-            row = cur.fetchone()
-        return int(dbmod.parse_agtype(row[0]) or 0) if row else 0
 
     def _close_fact(
         self, fact_id: str, ns: str, *, valid_to: str, superseded_by: str | None = None
     ) -> bool:
         """Закрыть validity-интервал факта (не удаляя его). True — если факт найден."""
-        params: dict[str, Any] = {
-            "fid": fact_id,
-            "ns": ns,
-            "vt": normalize_ts(valid_to) or _now_iso(),
-            "by": superseded_by,
-        }
-        sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"MATCH ()-[r {{fact_id: $fid, namespace: $ns}}]->() "
-            f"SET r.valid_to = $vt, r.superseded_by = $by "
-            f"RETURN id(r) $$, %s) AS (id agtype)"
+        rows = self.store._all(
+            "UPDATE {E} e SET valid_to = %(vt)s, props = (e.props - 'superseded_by'::text) "
+            "|| jsonb_strip_nulls(jsonb_build_object('superseded_by', %(by)s::text)) "
+            "WHERE e.namespace = %(ns)s AND e.fact_id = %(fid)s RETURNING e.id",
+            {
+                "vt": normalize_ts(valid_to) or _now_iso(),
+                "by": superseded_by,
+                "ns": ns,
+                "fid": fact_id,
+            },
         )
-        with self.conn.cursor() as cur:
-            cur.execute(sql, (agtype(params),))
-            return cur.fetchone() is not None
+        return bool(rows)
 
     def invalidate_fact(
         self,
@@ -352,22 +390,13 @@ class FactStore:
         ns = self._ns(namespace)
         closed = self._close_fact(fact_id, ns, valid_to=valid_to or _now_iso())
         if closed and observation_id:
-            existing = self.get_fact(fact_id, namespaces=[ns]) or {}
-            obs_ids = list(existing.get("observation_ids") or [])
-            if observation_id not in obs_ids:
-                obs_ids.append(observation_id)
-                self._set_observation_ids(fact_id, ns, obs_ids)
-        return closed
-
-    def _set_observation_ids(self, fact_id: str, ns: str, observation_ids: list[str]) -> None:
-        params: dict[str, Any] = {"fid": fact_id, "ns": ns, "obs": observation_ids}
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"SELECT * FROM cypher('{self.graph}', $$ "
-                f"MATCH ()-[r {{fact_id: $fid, namespace: $ns}}]->() "
-                f"SET r.observation_ids = $obs RETURN id(r) $$, %s) AS (id agtype)",
-                (agtype(params),),
+            self.store._run(
+                "UPDATE {E} SET observation_ids = coalesce(observation_ids, ARRAY[]::text[]) "
+                "|| %(oid)s::text WHERE namespace = %(ns)s AND fact_id = %(fid)s "
+                "AND NOT (coalesce(observation_ids, ARRAY[]::text[]) @> ARRAY[%(oid)s::text])",
+                {"oid": observation_id, "ns": ns, "fid": fact_id},
             )
+        return closed
 
     def scrub_derived_nodes(
         self, observation_id: str, namespace: str = "", *, purge: bool = False
@@ -376,81 +405,79 @@ class FactStore:
 
         Содержимое наблюдения не должно переживать его redact в производном
         узле (ADR-016 §8): props.content затирается, узел помечается
-        ``redacted``; при ``purge=True`` узел удаляется целиком (DETACH DELETE).
+        ``redacted``; при ``purge=True`` узел удаляется целиком вместе с рёбрами
+        (``on delete cascade``). Выборка — по колонке ``observation_id`` узла.
         Вернуть число затронутых узлов.
         """
-        ns = self._ns(namespace)
-        params: dict[str, Any] = {"oid": observation_id, "ns": ns}
-        action = (
-            "DETACH DELETE n" if purge else "SET n.props = {observation_id: $oid, redacted: true}"
+        params = {"oid": observation_id, "ns": self._ns(namespace)}
+        where = " WHERE namespace = %(ns)s AND observation_id = %(oid)s"
+        if purge:
+            return self.store._run("DELETE FROM {N}" + where, params)
+        return self.store._run(
+            "UPDATE {N} SET props = props || jsonb_build_object('props', "
+            "jsonb_build_object('observation_id', %(oid)s::text, 'redacted', true))" + where,
+            params,
         )
-        count_sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"MATCH (n {{namespace: $ns}}) WHERE n.props.observation_id = $oid "
-            f"RETURN count(n) $$, %s) AS (c agtype)"
-        )
-        with self.conn.cursor() as cur:
-            cur.execute(count_sql, (agtype(params),))
-            affected = int(dbmod.parse_agtype(cur.fetchone()[0]) or 0)
-            if affected:
-                cur.execute(
-                    f"SELECT * FROM cypher('{self.graph}', $$ "
-                    f"MATCH (n {{namespace: $ns}}) WHERE n.props.observation_id = $oid "
-                    f"{action} $$, %s) AS (v agtype)",
-                    (agtype(params),),
-                )
-        return affected
 
     def mark_evidence_lost(self, observation_id: str, namespace: str = "") -> int:
         """Отразить удаление наблюдения на derived-фактах (ADR-016 §8).
 
         Из ``observation_ids`` каждого факта вычёркивается id; факт, оставшийся
         без свидетельств, получает ``evidence_lost=true`` (retrieval по умолчанию
-        его не отдаёт; из графа не удаляется — аудит). Вернуть число фактов,
-        потерявших последнее свидетельство.
+        его не отдаёт; из графа не удаляется — аудит). Одним запросом. Вернуть число
+        фактов, потерявших последнее свидетельство.
         """
-        ns = self._ns(namespace)
-        affected = self.facts_for_observation(observation_id, namespaces=[ns])
-        lost = 0
-        for fact in affected:
-            obs_ids = [o for o in (fact.get("observation_ids") or []) if o != observation_id]
-            fid = str(fact.get("fact_id"))
-            with self.conn.transaction():
-                self._set_observation_ids(fid, ns, obs_ids)
-                if not obs_ids:
-                    params: dict[str, Any] = {"fid": fid, "ns": ns}
-                    with self.conn.cursor() as cur:
-                        cur.execute(
-                            f"SELECT * FROM cypher('{self.graph}', $$ "
-                            f"MATCH ()-[r {{fact_id: $fid, namespace: $ns}}]->() "
-                            f"SET r.evidence_lost = true RETURN id(r) $$, %s) AS (id agtype)",
-                            (agtype(params),),
-                        )
-                    lost += 1
-        return lost
+        rows = self.store._all(
+            "UPDATE {E} SET observation_ids = array_remove(observation_ids, %(oid)s::text), "
+            "evidence_lost = evidence_lost "
+            "OR cardinality(array_remove(observation_ids, %(oid)s::text)) = 0 "
+            "WHERE namespace = %(ns)s AND fact_id IS NOT NULL "
+            "AND observation_ids @> ARRAY[%(oid)s::text] "
+            "RETURNING cardinality(observation_ids) = 0",
+            {"oid": observation_id, "ns": self._ns(namespace)},
+        )
+        return sum(1 for (lost,) in rows if lost)
 
     # --- чтение ---
 
-    _RETURN = "RETURN a.natural_key, b.natural_key, type(r), properties(r), a.title, b.title "
+    def _select_facts(
+        self,
+        where: str,
+        params: dict[str, Any],
+        *,
+        limit: int | None = None,
+        lock: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Факты (рёбра с концами) по условию на ``e``/``a``/``b``, по возрастанию id."""
+        query = (
+            "SELECT a.natural_key, b.natural_key, e.type, "
+            + edge_json("e")
+            + ", a.props ->> 'title', b.props ->> 'title' FROM {E} e "
+            "JOIN {N} a ON a.id = e.src_id JOIN {N} b ON b.id = e.dst_id "
+            "WHERE " + where + " ORDER BY e.id"
+        )
+        if limit is not None:
+            query += f" LIMIT {int(limit)}"
+        if lock:
+            query += " FOR UPDATE OF e"
+        return self._rows_to_facts(self.store._all(query, params))
 
-    def _rows_to_facts(self, rows: list[tuple]) -> list[dict[str, Any]]:
+    @staticmethod
+    def _rows_to_facts(rows: list[tuple]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
-        for row in rows:
-            props = dbmod.parse_agtype(row[3])
-            if not isinstance(props, dict):
-                props = {}
+        for subject, obj, predicate, props, subject_title, object_title in rows:
             fact = {
-                # AGE не хранит null-свойства (SET r.x = null удаляет ключ) —
-                # нормализуем опциональные поля, чтобы потребитель видел None.
+                # Пустые свойства ребра не хранятся — нормализуем опциональные поля,
+                # чтобы потребитель видел None.
                 "valid_to": None,
                 "supersedes": None,
                 "superseded_by": None,
-                "subject": dbmod.parse_agtype(row[0]),
-                "object": dbmod.parse_agtype(row[1]),
-                "predicate": dbmod.parse_agtype(row[2]),
-                "subject_title": dbmod.parse_agtype(row[4]),
-                "object_title": dbmod.parse_agtype(row[5]),
-                **props,
+                "subject": subject,
+                "object": obj,
+                "predicate": predicate,
+                "subject_title": subject_title,
+                "object_title": object_title,
+                **(props if isinstance(props, dict) else {}),
             }
             out.append(fact)
         return out
@@ -458,17 +485,11 @@ class FactStore:
     def get_fact(self, fact_id: str, namespaces: Sequence[str] = ()) -> dict[str, Any] | None:
         """Вернуть факт по fact_id в области видимости, либо None."""
         nss = resolve_namespaces(namespaces, self.store.default_namespace)
-        params: dict[str, Any] = {"fid": fact_id, "nss": nss}
-        sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"MATCH (a)-[r {{fact_id: $fid}}]->(b) WHERE r.namespace IN $nss "
-            f"{self._RETURN}$$, %s) AS (s agtype, o agtype, p agtype, r agtype, st agtype, "
-            f"ot agtype)"
+        facts = self._select_facts(
+            "e.namespace = ANY(%(nss)s::text[]) AND e.fact_id = %(fid)s",
+            {"nss": nss, "fid": fact_id},
+            limit=1,
         )
-        with self.conn.cursor() as cur:
-            cur.execute(sql, (agtype(params),))
-            rows = cur.fetchall()
-        facts = self._rows_to_facts(rows)
         return facts[0] if facts else None
 
     def facts(
@@ -491,56 +512,40 @@ class FactStore:
         умолчанию скрыты (ADR-016 §8).
         """
         nss = resolve_namespaces(namespaces, self.store.default_namespace)
-        match = (
-            f"MATCH (a)-[r:{sanitize_label(predicate).upper()}]->(b)"
-            if predicate
-            else ("MATCH (a)-[r]->(b)")
-        )
-        conds = ["r.fact_id IS NOT NULL", "r.namespace IN $nss"]
+        conds = ["e.fact_id IS NOT NULL", "e.namespace = ANY(%(nss)s::text[])"]
         params: dict[str, Any] = {"nss": nss}
+        if predicate:
+            conds.append("e.type = %(type)s")
+            params["type"] = sanitize_label(predicate).upper()
+        # Конец ищется в тех же namespaces, что и факт (концы факта — в его namespace):
+        # так узел находится по индексу ``(namespace, natural_key)``, а не по ключу
+        # во всех базах.
         if subject:
-            conds.append("a.natural_key = $subj")
+            conds.append("a.namespace = ANY(%(nss)s::text[]) AND a.natural_key = %(subj)s")
             params["subj"] = subject
         if obj:
-            conds.append("b.natural_key = $obj")
+            conds.append("b.namespace = ANY(%(nss)s::text[]) AND b.natural_key = %(obj)s")
             params["obj"] = obj
         if not include_evidence_lost:
-            conds.append("(r.evidence_lost IS NULL OR r.evidence_lost = false)")
+            conds.append("NOT e.evidence_lost")
         if as_of:
             params["t"] = normalize_ts(as_of)
-            conds.append("(r.valid_from IS NULL OR r.valid_from = '' OR r.valid_from <= $t)")
-            conds.append("(r.valid_to IS NULL OR r.valid_to > $t)")
+            conds.append("(e.valid_from IS NULL OR e.valid_from = '' OR e.valid_from <= %(t)s)")
+            conds.append("(e.valid_to IS NULL OR e.valid_to > %(t)s)")
         elif not include_closed:
-            conds.append("(r.valid_to IS NULL)")
-        sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"{match} WHERE {' AND '.join(conds)} "
-            f"{self._RETURN}$$, %s) AS (s agtype, o agtype, p agtype, r agtype, st agtype, "
-            f"ot agtype) LIMIT {int(limit)}"
-        )
-        with self.conn.cursor() as cur:
-            cur.execute(sql, (agtype(params),))
-            rows = cur.fetchall()
-        return self._rows_to_facts(rows)
+            conds.append("e.valid_to IS NULL")
+        return self._select_facts(" AND ".join(conds), params, limit=limit)
 
     def facts_for_observation(
         self, observation_id: str, namespaces: Sequence[str] = ()
     ) -> list[dict[str, Any]]:
         """Все факты, среди свидетельств которых есть данное наблюдение."""
         nss = resolve_namespaces(namespaces, self.store.default_namespace)
-        params: dict[str, Any] = {"oid": observation_id, "nss": nss}
-        sql = (
-            f"SELECT * FROM cypher('{self.graph}', $$ "
-            f"MATCH (a)-[r]->(b) "
-            f"WHERE r.fact_id IS NOT NULL AND r.namespace IN $nss "
-            f"AND $oid IN r.observation_ids "
-            f"{self._RETURN}$$, %s) AS (s agtype, o agtype, p agtype, r agtype, st agtype, "
-            f"ot agtype)"
+        return self._select_facts(
+            "e.fact_id IS NOT NULL AND e.namespace = ANY(%(nss)s::text[]) "
+            "AND e.observation_ids @> ARRAY[%(oid)s::text]",
+            {"nss": nss, "oid": observation_id},
         )
-        with self.conn.cursor() as cur:
-            cur.execute(sql, (agtype(params),))
-            rows = cur.fetchall()
-        return self._rows_to_facts(rows)
 
     @staticmethod
     def find_conflicts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:

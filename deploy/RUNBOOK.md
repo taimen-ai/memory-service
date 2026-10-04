@@ -66,9 +66,10 @@ Platform Access Token на этот audience. `CB_IAM_JWKS_URL` указывай
 авторизации (все `CB_*_KEY*` пусты) при `CB_IAM_ENABLED=true` **не включается** —
 запрос без токена получит `401`.
 
-Сборка образа: контекст — **корень суперпроекта** (`context: ../..`,
-`dockerfile: memory-service/Dockerfile`), потому что `platform-auth-sdk` — соседний
-каталог; `Dockerfile.dockerignore` ограничивает контекст двумя каталогами.
+Сборка образа: контекст — **корень суперпроекта** (`context: ../../..`,
+`dockerfile: services/memory-service/Dockerfile`), потому что `platform-auth-sdk`
+лежит в `sdk/platform-auth-sdk` (раскладка TAI-ADR-0064); `Dockerfile.dockerignore`
+ограничивает контекст двумя каталогами.
 
 ## Reverse proxy — обязательный контур доступа
 
@@ -177,6 +178,43 @@ Engine (ADR-016) при старте сервиса дополнительно �
 trigram-индексами (без прав на CREATE EXTENSION identifier-поиск деградирует до
 последовательного ILIKE — корректно, медленнее; образ `memory-db` ставит
 расширение сам). Существующие таблицы и граф не меняются.
+
+### Переход на граф в таблицах (MEM-ADR-023)
+
+Версия с графом в таблицах PostgreSQL (`graph_nodes`/`graph_edges`) не читает граф
+Apache AGE: на контуре, где граф ещё в AGE, его переносит одноразовая команда. Делается
+один раз, пока расширение AGE стоит; данные AGE она не меняет.
+
+```bash
+cd deploy
+docker compose exec -T memory-db pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB" > backup-before-graph-tables.dump
+git pull && docker compose build memory-service
+docker compose stop memory-service            # прежняя версия больше не пишет в AGE
+docker compose run --rm memory-service cb migrate-graph-from-age --dry-run
+docker compose run --rm memory-service cb migrate-graph-from-age; echo "exit=$?"
+docker compose up -d memory-service
+./smoke-test.sh
+```
+
+- `--dry-run` показывает, сколько узлов и рёбер в каждом namespace, дубли и то, что не
+  перенесётся (ключ длиннее 2048 байт, запись без `natural_key`, ребро к такой вершине).
+  Пропуски — решение владельца до переноса: команда их не обрезает и не чинит.
+- Код выхода: `0` — таблицы = AGE − дубли по каждому namespace; `1` — расхождение или
+  пропуски (список в отчёте); `2` — графа AGE нет (`CB_GRAPH_NAME`?), конфликт имён в
+  схеме или ошибка БД. Повторный запуск доносит недостающее и ничего не дублирует —
+  **но только пока сервис остановлен, до `up -d`**. После запуска сервис удаляет узлы
+  (purge наблюдений, prune vault), а AGE их по-прежнему хранит: повтор вернул бы
+  удалённое, в том числе вычищенные персональные данные. После `up -d` команду не
+  запускать; проверка после запуска — только `--dry-run` (он ничего не пишет).
+- «Каталог AGE указывает на OID другого кластера» — база восстанавливалась из дампа;
+  переносу не мешает, `cypher()` на ней не работает (рецепт починки — в отчёте).
+- Новая версия запущена до переноса и уже писала в пустые таблицы — сверка покажет
+  лишние строки (`1`); перенос при этом идёт (`ON CONFLICT DO NOTHING`), решение о
+  расхождении — по отчёту.
+- Откат до удаления AGE — прежний образ сервиса: граф AGE не тронут. Расширение и
+  таблицы меток AGE удаляет отдельный шаг следующего релиза; не через
+  `ag_catalog.drop_graph(…, true)` — он удаляет схему графа целиком, вместе с
+  `graph_nodes`/`graph_edges`.
 
 Диагностика нового контура: `GET /api/memory/observations?status=failed` —
 наблюдения, чья проекция не удалась (сырые записи не теряются);

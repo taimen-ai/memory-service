@@ -3,7 +3,7 @@
 #
 # Перенесён MCP-каркас: low-level mcp.server.Server, транспорты stdio и Streamable HTTP,
 # api-key middleware (raw-ASGI, не ломающий SSE), per-session state. Адаптировано: источник
-# графа — наш AGE-store (а не graph.json), tool'ы переписаны на GraphStore/retrieve_subgraph,
+# графа — наш GraphStore (а не graph.json), tool'ы переписаны на GraphStore/retrieve_subgraph,
 # поля чистятся нашей границей доверия (llm_safety). Tool-набор сведён к контракту задачи:
 # query_graph / get_node / get_neighbors / shortest_path.
 """MCP-сервер: отдать граф Company Brain агентам по Model Context Protocol.
@@ -396,7 +396,7 @@ for _name, _desc, _schema, _fn in _TOOL_SPECS:
 
 
 def build_server(settings: Settings | None = None):
-    """Собрать low-level MCP Server со всеми tool'ами над AGE-графом Company Brain."""
+    """Собрать low-level MCP Server со всеми tool'ами над графом памяти."""
     from mcp import types
     from mcp.server import Server
 

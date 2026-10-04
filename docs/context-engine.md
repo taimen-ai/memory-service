@@ -25,7 +25,7 @@ Episode                  │
   └── Relation           │
         │                │
         ▼                │
- Knowledge Graph (AGE)   │
+ Knowledge Graph (SQL)   │
         │                │
         ├───────────────┐│
         │               ││
@@ -244,8 +244,12 @@ consolidation-redrive. LLM нужен только для: extraction unstructur
 context на бюджетах (датасеты 1k/10k/100k). `benchmarks/graph_ops.py` —
 протокол `GraphBenchOps` (entity lookup, 1-hop, 2-hop, temporal filter,
 neighborhood, shortest path): будущий альтернативный графовый движок
-сравнивается с AGE реализацией протокола, без переписывания Context API
-(ADR-015: runtime-абстракцию хранилища не строим). `benchmarks/typed_context.py` —
+сравнивается с текущей реализацией протокола (таблицы PostgreSQL, MEM-ADR-023), без переписывания Context API
+(ADR-015: runtime-абстракцию хранилища не строим). Реализации — `TableBenchOps` (таблицы)
+и `AgeBenchOps` (запросы прежнего кода на AGE); `bench.py engines` сравнивает их на одних
+данных вместе с гибридным запросом Context Compiler и JIT вкл./выкл., `graph_gen.py`
+генерирует граф для такого сравнения — замер MEM-ADR-023 п.6, отчёт
+[`benchmarks/graph-engines.md`](../benchmarks/graph-engines.md). `benchmarks/typed_context.py` —
 профиль `/context/typed` на графе размера staging (снимки пяти репозиториев и узлы
 чужого namespace): латентность по фазам и число SQL (MEM-ADR-020, амендмент
 «пакетное разрешение якорей»).

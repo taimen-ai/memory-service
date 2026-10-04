@@ -11,6 +11,10 @@
 Сценарии: observation ingest (single/batch), lexical/vector retrieval,
 graph expansion (GraphBenchOps), hybrid build_context на трёх бюджетах.
 Результат — JSON в stdout (медиана/квантили по латентности, rps по ingest).
+
+Сравнение движков графа (MEM-ADR-023 п.6): ``bench.py engines --dsn … --graph …`` —
+GraphBenchOps для AGE и для таблиц на одних данных, гибридный запрос Context Compiler,
+JIT вкл./выкл. (``benchmarks/engines.py``, порядок прогона — ``benchmarks/graph-engines.md``).
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from benchmarks.graph_ops import AgeBenchOps  # noqa: E402
+from benchmarks.graph_ops import TableBenchOps  # noqa: E402
 
 from platform_memory import build_context, retain_observation, retain_observations  # noqa: E402
 from platform_memory.core import db as dbmod  # noqa: E402
@@ -83,6 +87,12 @@ def _quantiles(samples: list[float]) -> dict:
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["engines"]:
+        from benchmarks.engines import run
+
+        report = run(sys.argv[2:])
+        print(json.dumps(report, ensure_ascii=False, indent=1))
+        return
     parser = argparse.ArgumentParser()
     parser.add_argument("--size", type=int, default=1000, help="Число наблюдений (1k/10k/100k)")
     parser.add_argument("--queries", type=int, default=30, help="Число замеров retrieval")
@@ -166,7 +176,7 @@ def main() -> None:
             report["vector"] = _quantiles(samples)
 
         # --- graph expansion (GraphBenchOps) ---
-        ops = AgeBenchOps(settings, conn)
+        ops = TableBenchOps(settings, conn)
         keys = [f"person:u{i}" for i in range(0, 50, 5)]
         for name, fn in (
             ("entity_lookup", lambda k: ops.entity_lookup(k)),

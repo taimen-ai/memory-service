@@ -1,0 +1,17 @@
+# Машиночитаемые соглашения memory-service для исполнителя (формат v1 —
+# runner_config.md рядом с control_plane_agent в control-plane). Проза — AGENTS.md.
+# Исполнитель читает файл только с базовой ревизии задачи.
+version: 1
+# platform-auth-sdk — path-зависимость uv (ADR-018); control-plane — главный
+# клиент HTTP API, только для чтения (AGENTS.md, «Среда исполнителя»).
+neighbours: [platform-auth-sdk, control-plane]
+setup: make install
+services:
+  # PostgreSQL 16 + Apache AGE + pgvector: шаблон узла graph-db (образ infra/memory-db).
+  db:
+    template: graph-db
+    env:
+      CB_TEST_DATABASE_URL: "postgresql://{user}:{password}@{host}:{port}/{database}"
+checks:
+  - {name: lint, run: make lint}
+  - {name: tests, run: make test, services: [db]}

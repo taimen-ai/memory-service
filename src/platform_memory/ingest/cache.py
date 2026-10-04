@@ -28,7 +28,7 @@ from pathlib import Path
 
 from platform_memory.ingest.chunker import CHUNKER_VERSION
 
-# Метка валидной AGE/файловой компоненты пути кэша (имя модели может содержать слэши/двоеточия).
+# Метка валидной файловой компоненты пути кэша (имя модели может содержать слэши/двоеточия).
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 

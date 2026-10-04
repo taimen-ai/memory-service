@@ -27,7 +27,6 @@ import pytest
 
 from platform_memory.context.typed import compile_typed_context
 from platform_memory.core import db as dbmod
-from platform_memory.core.db import agtype
 from platform_memory.core.kinds import UnknownRelationError
 from platform_memory.domain.reconcile import (
     SnapshotError,
@@ -37,7 +36,6 @@ from platform_memory.domain.reconcile import (
     reconcile,
 )
 from platform_memory.domain.registry import open_registry
-from platform_memory.graph import store as store_mod
 from platform_memory.observations.store import SchemaMigrationBusy
 
 pytestmark = pytest.mark.integration
@@ -531,46 +529,44 @@ class TestPerformance:
     def test_key_lookups_indexed_on_large_graph(self, stores, settings, registry):
         """Граф ~30k узлов, снимок ~1000 элементов со связями на существующие узлы.
 
-        Выборки по списку ключей (``existing_keys``/``close_entities``) — ``UNWIND`` +
-        равенство, с hash-индексом ключа на метке: секунды на снимок, а не на выборку.
+        Выборки по списку ключей (``existing_keys``/``close_entities``) — ``= ANY`` по
+        уникальному индексу ``(namespace, label, natural_key)``: секунды на снимок, а не
+        на выборку (MEM-ADR-023).
         """
         conn, graph, _, _, _ = stores
         big = 30_000
-        with conn.transaction():
-            graph.ensure_label_index("endpoint")
         with conn.cursor() as cur:
-            for start in range(0, big, 10_000):
-                rows = [
-                    # Треть узлов — в чужом namespace: фильтр namespace тоже работает.
-                    {"k": f"GET /api/big/{i}/{{}}", "ns": NS if i % 3 else "tenant:other"}
-                    for i in range(start, start + 10_000)
-                ]
-                cur.execute(
-                    f"SELECT * FROM cypher('{graph.graph}', $$ UNWIND $rows AS r "
-                    "CREATE (:endpoint {natural_key: r.k, namespace: r.ns, type: 'endpoint'}) "
-                    "$$, %s) AS (v agtype)",
-                    (agtype({"rows": rows}),),
-                )
-            cur.execute(f'ANALYZE "{graph.graph}".endpoint')
+            # Треть узлов — в чужом namespace: фильтр namespace тоже работает.
+            cur.execute(
+                graph.sql(
+                    "INSERT INTO {N} (namespace, label, natural_key, type) "
+                    "SELECT CASE WHEN i %% 3 = 0 THEN 'tenant:other' ELSE %s END, 'endpoint', "
+                    "'GET /api/big/' || i || '/{{}}', 'endpoint' FROM generate_series(0, %s) i"
+                ),
+                (NS, big - 1),
+            )
+            cur.execute(graph.sql("ANALYZE {N}"))
 
         keys = [f"GET /api/big/{i}/{{}}" for i in range(0, 3000, 3)] + ["GET /nope/{}"]
         t0 = time.monotonic()
         found = graph.existing_keys("endpoint", keys, NS)
         lookup = time.monotonic() - t0
         assert found == {k for k in keys[:-1] if int(k.split("/")[3]) % 3}
-        assert graph.existing_keys("no_such_kind", keys, NS) == set()  # метку не создаёт
+        assert graph.existing_keys("no_such_kind", keys, NS) == set()
 
-        # Индекс применим к выборке: без seq scan план идёт по hash-индексу ключа.
+        # Выборка идёт по индексу таблицы узлов, а не просмотром всей таблицы (какой из
+        # индексов — решает планировщик по статистике).
         with conn.transaction(), conn.cursor() as cur:
             cur.execute("SET LOCAL enable_seqscan = off")
             cur.execute(
-                f"EXPLAIN SELECT * FROM cypher('{graph.graph}', $$ UNWIND $keys AS k "
-                "MATCH (n:endpoint) WHERE n.natural_key = k AND n.namespace = $ns "
-                "RETURN n.natural_key $$, %s) AS (k agtype)",
-                (agtype({"keys": keys, "ns": NS}),),
+                graph.sql(
+                    "EXPLAIN SELECT natural_key FROM {N} "
+                    "WHERE namespace = %s AND label = 'endpoint' AND natural_key = ANY(%s::text[])"
+                ),
+                (NS, keys),
             )
             plan = "\n".join(r[0] for r in cur.fetchall())
-        assert "endpoint_pm_nk_hash" in plan, plan
+        assert "Seq Scan" not in plan and "Index" in plan, plan
 
         calls = [i for i in range(1, 1500, 3)]
         entities = [{"kind": "component", "key": "big", "attributes": {}}]
@@ -612,74 +608,41 @@ class TestPerformance:
         assert cold < 15 and warm < 15, (cold, warm)
 
 
-class TestLabelIndexes:
-    """Кэш «индексы метки есть» и имена индексов длинных меток (MEM-ADR-020, амендмент)."""
+class TestLabelsWithoutDdl:
+    """Метка — значение колонки (MEM-ADR-023): новый вид не создаёт таблиц и индексов."""
 
     @staticmethod
-    def _indexes(conn, graph: str, label: str) -> set[str]:
+    def _relations(conn, graph: str) -> set[str]:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT indexname FROM pg_indexes WHERE schemaname = %s AND tablename = %s",
-                (graph, label),
+                "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = %s",
+                (graph,),
             )
             return {r[0] for r in cur.fetchall()}
 
-    @staticmethod
-    def _table_locks(conn, graph: str, label: str) -> set[str]:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT l.mode FROM pg_locks l JOIN pg_class c ON c.oid = l.relation "
-                "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE n.nspname = %s AND c.relname = %s AND l.pid = pg_backend_pid()",
-                (graph, label),
-            )
-            return {r[0] for r in cur.fetchall()}
-
-    def test_ready_label_skips_create_index(self, stores):
+    def test_new_and_long_labels_need_no_ddl(self, stores):
         conn, graph, _, _, _ = stores
-        key = (store_mod._db_key(conn), graph.graph, "endpoint", False)
-        with conn.transaction():
-            assert graph.ensure_label_index("endpoint")
-            # Создан этой транзакцией — ещё может откатиться, в кэш не попадает.
-            assert key not in store_mod._READY_LABEL_INDEXES
-            assert "ShareLock" in self._table_locks(conn, graph.graph, "endpoint")
-        with conn.transaction():
-            assert graph.ensure_label_index("endpoint", create=False)
-            assert key in store_mod._READY_LABEL_INDEXES
-        with conn.transaction():
-            assert graph.existing_keys("endpoint", ["x"], NS) == set()
-            # Повторный вызов из кэша: ни CREATE INDEX, ни его ShareLock на таблицу метки.
-            assert "ShareLock" not in self._table_locks(conn, graph.graph, "endpoint")
-
-    def test_rolled_back_index_is_not_cached(self, stores):
-        conn, graph, _, _, _ = stores
-        key = (store_mod._db_key(conn), graph.graph, "service", False)
-
-        class Boom(Exception):
-            pass
-
-        with pytest.raises(Boom), conn.transaction():
-            graph.ensure_label_index("service")
-            graph.ensure_label_index("service")  # второй вызов в той же транзакции
-            raise Boom
-        assert key not in store_mod._READY_LABEL_INDEXES
-        assert graph.ensure_label_index("service", create=False) is False  # метки нет
-
-    def test_long_labels_with_common_prefix_get_own_indexes(self, stores):
-        conn, graph, _, _, _ = stores
-        prefix = "k" * 50
+        before = self._relations(conn, graph.graph)
+        prefix = "k" * 70  # длиннее предела идентификатора PostgreSQL (63 байта)
         first, second = f"{prefix}_alpha", f"{prefix}_beta"
-        with conn.transaction():
-            graph.ensure_label_index(first)
-            graph.ensure_label_index(second)
-        a, b = self._indexes(conn, graph.graph, first), self._indexes(conn, graph.graph, second)
-        assert len(a) == 2 and len(b) == 2 and not a & b
-        assert all(len(name) <= 63 for name in a | b)
-        # Короткая метка — прежние имена (совпадают с созданными на действующих графах).
-        assert store_mod._label_index_names("endpoint", edge=False) == [
-            "endpoint_pm_props_gin",
-            "endpoint_pm_nk_hash",
-        ]
+        for kind in ("endpoint", first, second):
+            graph.upsert_entities(
+                kind,
+                [{"k": "same-key", "t": kind, "sp": "s", "props": {}}],
+                NS,
+                valid_from="2026-09-23T10:00:00Z",
+                last_seen="2026-09-23T10:00:00Z",
+            )
+        assert self._relations(conn, graph.graph) == before
+        # Две длинные метки с общим префиксом — разные узлы одного ключа.
+        assert graph.existing_keys(first, ["same-key"], NS) == {"same-key"}
+        assert graph.existing_keys(second, ["same-key"], NS) == {"same-key"}
+        assert {n["type"] for n in graph.nodes_by_keys(["same-key"], [NS])} == {
+            "endpoint",
+            first,
+            second,
+        }
 
 
 EMPTY = {"opened": [], "changed": [], "closed": []}
@@ -1162,3 +1125,23 @@ class TestHttpEndToEnd:
         )
         assert pack_resp.status_code == 200
         assert UI_CALL in _non_anchor(pack_resp.json())
+
+
+def test_too_long_entity_key_refuses_snapshot_before_index(stores, settings, cp):
+    """Ключ сущности длиннее предела — отказ GraphKeyTooLong, снимок не применён (ревью 1284).
+
+    Namespace без пакета и строгого режима: шаблоны ключей видов длину не ограничивают.
+    """
+    import hashlib
+
+    conn, graph = stores[0], stores[1]
+    loose = "tenant:t1:ws:loose"
+    snap = copy.deepcopy(cp)
+    snap.pop("pack", None)
+    long_key = hashlib.sha256(b"k").hexdigest() * 70  # ~4,5 КБ, плохо сжимается
+    snap["entities"][1]["key"] = "control-plane:" + long_key
+    with pytest.raises(dbmod.GraphKeyTooLong, match="^natural_key_too_long"):
+        reconcile(settings, snapshot=snap, namespace=loose, conn=conn)
+    assert graph.count_nodes_by_type([loose]) == {}
+    snap["entities"][1]["key"] = "control-plane:short"
+    assert reconcile(settings, snapshot=snap, namespace=loose, conn=conn)["duplicate"] is False

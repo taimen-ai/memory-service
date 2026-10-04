@@ -1,0 +1,859 @@
+{
+ "generator": {
+  "graph": "bench_graph",
+  "seed": 42,
+  "digest": "3912d534c6e5b9d2",
+  "seconds": 63.7,
+  "nodes": 27365,
+  "edges": 69114,
+  "chunks": 2828,
+  "observations": 5600,
+  "namespaces": {
+   "tenant:bench:ws:main": {
+    "nodes": 24626,
+    "edges": 62258
+   },
+   "tenant:bench:ws:other": {
+    "nodes": 2739,
+    "edges": 6856
+   }
+  }
+ },
+ "run_all_configs": {
+  "seed": 42,
+  "iterations": 200,
+  "warmup": 20,
+  "budget_seconds": 120.0,
+  "environment": {
+   "host": {
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.9",
+    "cpu_count": 10
+   },
+   "postgres": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+   "extensions": {
+    "age": "1.6.0",
+    "pg_trgm": "1.6",
+    "plpgsql": "1.0",
+    "vector": "0.8.0"
+   },
+   "pg_settings": {
+    "shared_buffers": "128MB",
+    "work_mem": "4MB",
+    "effective_cache_size": "4GB",
+    "jit_above_cost": "100000"
+   },
+   "data": {
+    "graph": "bench_graph",
+    "namespace": "tenant:bench:ws:main",
+    "nodes": 27365,
+    "nodes_in_namespace": 24626,
+    "edges": 69114,
+    "edges_in_namespace": 62258,
+    "fact_edges": 19009,
+    "chunks": 2828,
+    "age_size": "103 MB",
+    "tables_size": "64 MB"
+   }
+  },
+  "sample": {
+   "keys": 50,
+   "hub_keys": 25,
+   "subjects": 50,
+   "as_of": "2025-03-23T11:33:50Z",
+   "allowed_scopes": [
+    "project:p19",
+    "project:p0",
+    "project:p8",
+    "project:p13",
+    "project:p3"
+   ],
+   "degree_p50": 4,
+   "hub_degree_min": 11,
+   "degree_max": 2799,
+   "queries": 50,
+   "embedding_dim": 1536
+  },
+  "results": {
+   "entity_lookup": {
+    "age:off": {
+     "p50_ms": 1.523,
+     "p95_ms": 2.618,
+     "mean_ms": 1.655,
+     "max_ms": 4.272,
+     "n": 200,
+     "hub": {
+      "p50_ms": 1.523,
+      "p95_ms": 2.618,
+      "mean_ms": 1.658,
+      "max_ms": 3.275,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 1.516,
+      "p95_ms": 2.609,
+      "mean_ms": 1.652,
+      "max_ms": 4.272,
+      "n": 100
+     }
+    },
+    "tables:off": {
+     "p50_ms": 0.351,
+     "p95_ms": 0.79,
+     "mean_ms": 0.426,
+     "max_ms": 1.489,
+     "n": 200,
+     "hub": {
+      "p50_ms": 0.34,
+      "p95_ms": 0.772,
+      "mean_ms": 0.429,
+      "max_ms": 1.489,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 0.358,
+      "p95_ms": 0.79,
+      "mean_ms": 0.423,
+      "max_ms": 1.29,
+      "n": 100
+     }
+    },
+    "tables:on": {
+     "p50_ms": 0.485,
+     "p95_ms": 0.934,
+     "mean_ms": 0.541,
+     "max_ms": 1.923,
+     "n": 200,
+     "hub": {
+      "p50_ms": 0.483,
+      "p95_ms": 0.941,
+      "mean_ms": 0.554,
+      "max_ms": 1.923,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 0.491,
+      "p95_ms": 0.884,
+      "mean_ms": 0.527,
+      "max_ms": 1.876,
+      "n": 100
+     }
+    },
+    "age:on": {
+     "p50_ms": 1.897,
+     "p95_ms": 2.758,
+     "mean_ms": 1.987,
+     "max_ms": 3.433,
+     "n": 200,
+     "hub": {
+      "p50_ms": 1.902,
+      "p95_ms": 2.758,
+      "mean_ms": 2.0,
+      "max_ms": 3.234,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 1.881,
+      "p95_ms": 2.743,
+      "mean_ms": 1.974,
+      "max_ms": 3.433,
+      "n": 100
+     }
+    }
+   },
+   "one_hop": {
+    "age:off": {
+     "p50_ms": 132.996,
+     "p95_ms": 485.263,
+     "mean_ms": 210.29,
+     "max_ms": 2470.022,
+     "n": 200,
+     "hub": {
+      "p50_ms": 188.162,
+      "p95_ms": 554.321,
+      "mean_ms": 329.902,
+      "max_ms": 2470.022,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 84.242,
+      "p95_ms": 139.059,
+      "mean_ms": 90.678,
+      "max_ms": 175.505,
+      "n": 100
+     }
+    },
+    "tables:off": {
+     "p50_ms": 0.719,
+     "p95_ms": 1.911,
+     "mean_ms": 0.937,
+     "max_ms": 6.407,
+     "n": 200,
+     "hub": {
+      "p50_ms": 0.876,
+      "p95_ms": 2.829,
+      "mean_ms": 1.159,
+      "max_ms": 6.407,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 0.644,
+      "p95_ms": 1.003,
+      "mean_ms": 0.714,
+      "max_ms": 2.826,
+      "n": 100
+     }
+    },
+    "tables:on": {
+     "p50_ms": 1.339,
+     "p95_ms": 6.915,
+     "mean_ms": 2.147,
+     "max_ms": 12.57,
+     "n": 200,
+     "hub": {
+      "p50_ms": 1.463,
+      "p95_ms": 7.63,
+      "mean_ms": 2.579,
+      "max_ms": 12.57,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 1.133,
+      "p95_ms": 4.2,
+      "mean_ms": 1.715,
+      "max_ms": 8.08,
+      "n": 100
+     }
+    },
+    "age:on": {
+     "p50_ms": 294.573,
+     "p95_ms": 703.21,
+     "mean_ms": 388.267,
+     "max_ms": 3350.489,
+     "n": 200,
+     "hub": {
+      "p50_ms": 370.587,
+      "p95_ms": 1076.92,
+      "mean_ms": 496.96,
+      "max_ms": 3350.489,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 240.717,
+      "p95_ms": 467.746,
+      "mean_ms": 279.574,
+      "max_ms": 911.645,
+      "n": 100
+     }
+    }
+   },
+   "two_hop": {
+    "age:off": {
+     "p50_ms": 41804.911,
+     "p95_ms": 50279.244,
+     "mean_ms": 28108.439,
+     "max_ms": 50279.244,
+     "n": 5,
+     "truncated": true,
+     "hub": {
+      "p50_ms": 44590.718,
+      "p95_ms": 50279.244,
+      "mean_ms": 45558.291,
+      "max_ms": 50279.244,
+      "n": 3
+     },
+     "uniform": {
+      "p50_ms": 1933.662,
+      "p95_ms": 3647.059,
+      "mean_ms": 1933.662,
+      "max_ms": 3647.059,
+      "n": 2
+     }
+    },
+    "tables:off": {
+     "p50_ms": 8.318,
+     "p95_ms": 56.73,
+     "mean_ms": 17.34,
+     "max_ms": 70.686,
+     "n": 200,
+     "hub": {
+      "p50_ms": 23.924,
+      "p95_ms": 59.21,
+      "mean_ms": 27.498,
+      "max_ms": 70.686,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 5.177,
+      "p95_ms": 26.665,
+      "mean_ms": 7.182,
+      "max_ms": 49.78,
+      "n": 100
+     }
+    },
+    "tables:on": {
+     "p50_ms": 6.505,
+     "p95_ms": 44.465,
+     "mean_ms": 15.366,
+     "max_ms": 61.007,
+     "n": 200,
+     "hub": {
+      "p50_ms": 21.588,
+      "p95_ms": 48.462,
+      "mean_ms": 23.641,
+      "max_ms": 61.007,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 4.583,
+      "p95_ms": 35.915,
+      "mean_ms": 7.09,
+      "max_ms": 50.742,
+      "n": 100
+     }
+    },
+    "age:on": {
+     "p50_ms": 34046.755,
+     "p95_ms": 72417.905,
+     "mean_ms": 30881.356,
+     "max_ms": 72417.905,
+     "n": 5,
+     "truncated": true,
+     "hub": {
+      "p50_ms": 44360.136,
+      "p95_ms": 72417.905,
+      "mean_ms": 50274.932,
+      "max_ms": 72417.905,
+      "n": 3
+     },
+     "uniform": {
+      "p50_ms": 1790.992,
+      "p95_ms": 3166.848,
+      "mean_ms": 1790.992,
+      "max_ms": 3166.848,
+      "n": 2
+     }
+    }
+   },
+   "neighborhood": {
+    "age:off": {
+     "p50_ms": 545.895,
+     "p95_ms": 1944.278,
+     "mean_ms": 695.034,
+     "max_ms": 2794.583,
+     "n": 173,
+     "truncated": true
+    },
+    "tables:off": {
+     "p50_ms": 1.233,
+     "p95_ms": 3.705,
+     "mean_ms": 1.73,
+     "max_ms": 35.978,
+     "n": 200
+    },
+    "tables:on": {
+     "p50_ms": 1.195,
+     "p95_ms": 3.748,
+     "mean_ms": 1.493,
+     "max_ms": 9.597,
+     "n": 200
+    },
+    "age:on": {
+     "p50_ms": 648.384,
+     "p95_ms": 2104.894,
+     "mean_ms": 800.752,
+     "max_ms": 2540.774,
+     "n": 151,
+     "truncated": true
+    }
+   },
+   "temporal_filter": {
+    "age:off": {
+     "p50_ms": 1.799,
+     "p95_ms": 2.033,
+     "mean_ms": 1.712,
+     "max_ms": 3.683,
+     "n": 200
+    },
+    "tables:off": {
+     "p50_ms": 0.451,
+     "p95_ms": 0.737,
+     "mean_ms": 0.47,
+     "max_ms": 1.193,
+     "n": 200
+    },
+    "tables:on": {
+     "p50_ms": 0.471,
+     "p95_ms": 0.726,
+     "mean_ms": 0.49,
+     "max_ms": 1.051,
+     "n": 200
+    },
+    "age:on": {
+     "p50_ms": 2.166,
+     "p95_ms": 4.031,
+     "mean_ms": 2.385,
+     "max_ms": 4.957,
+     "n": 200
+    }
+   },
+   "hybrid": {
+    "age:off": {
+     "p50_ms": 110938.161,
+     "p95_ms": 117289.203,
+     "mean_ms": 110938.161,
+     "max_ms": 117289.203,
+     "n": 2,
+     "truncated": true
+    },
+    "tables:off": {
+     "p50_ms": 510.132,
+     "p95_ms": 695.35,
+     "mean_ms": 524.227,
+     "max_ms": 965.174,
+     "n": 200
+    },
+    "tables:on": {
+     "p50_ms": 474.464,
+     "p95_ms": 799.903,
+     "mean_ms": 500.946,
+     "max_ms": 1459.749,
+     "n": 200
+    },
+    "age:on": {
+     "p50_ms": 134700.669,
+     "p95_ms": 134700.669,
+     "mean_ms": 134700.669,
+     "max_ms": 134700.669,
+     "n": 1,
+     "truncated": true
+    }
+   }
+  },
+  "plans": {
+   "entity_lookup": {
+    "age:off": {
+     "queries": 1,
+     "max_cost": 430.0
+    },
+    "tables:off": {
+     "queries": 1,
+     "max_cost": 8.5
+    },
+    "tables:on": {
+     "queries": 1,
+     "max_cost": 8.5
+    },
+    "age:on": {
+     "queries": 1,
+     "max_cost": 430.0
+    }
+   },
+   "one_hop": {
+    "age:off": {
+     "queries": 1,
+     "max_cost": 713436778.3
+    },
+    "tables:off": {
+     "queries": 3,
+     "max_cost": 152.8
+    },
+    "tables:on": {
+     "queries": 3,
+     "max_cost": 152.8
+    },
+    "age:on": {
+     "queries": 1,
+     "max_cost": 713436778.3
+    }
+   },
+   "two_hop": {
+    "age:off": {
+     "queries": 1,
+     "max_cost": 713436778.3
+    },
+    "tables:off": {
+     "queries": 4,
+     "max_cost": 3388.6
+    },
+    "tables:on": {
+     "queries": 4,
+     "max_cost": 3388.6
+    },
+    "age:on": {
+     "queries": 1,
+     "max_cost": 713436778.3
+    }
+   },
+   "neighborhood": {
+    "age:off": {
+     "queries": 1,
+     "max_cost": 713436778.7
+    },
+    "tables:off": {
+     "queries": 3,
+     "max_cost": 976.3
+    },
+    "tables:on": {
+     "queries": 3,
+     "max_cost": 976.3
+    },
+    "age:on": {
+     "queries": 1,
+     "max_cost": 713436778.7
+    }
+   },
+   "temporal_filter": {
+    "age:off": {
+     "queries": 1,
+     "max_cost": 6003.1
+    },
+    "tables:off": {
+     "queries": 1,
+     "max_cost": 26.5
+    },
+    "tables:on": {
+     "queries": 1,
+     "max_cost": 26.5
+    },
+    "age:on": {
+     "queries": 1,
+     "max_cost": 6003.1
+    }
+   },
+   "hybrid": {
+    "age:off": {
+     "queries": 19,
+     "max_cost": 713436778.7
+    },
+    "tables:off": {
+     "queries": 22,
+     "max_cost": 8291.4
+    },
+    "tables:on": {
+     "queries": 22,
+     "max_cost": 8291.4
+    },
+    "age:on": {
+     "queries": 19,
+     "max_cost": 713436778.7
+    }
+   }
+  },
+  "verify_mismatches": {
+   "entity_lookup": 0,
+   "one_hop": 0,
+   "two_hop": 0,
+   "temporal_filter": 0,
+   "checked": {
+    "keys": 10,
+    "two_hop_keys": 5,
+    "subjects": 10
+   }
+  }
+ },
+ "run_tables_jit_repeat": {
+  "seed": 42,
+  "iterations": 200,
+  "warmup": 20,
+  "budget_seconds": 120.0,
+  "environment": {
+   "host": {
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.9",
+    "cpu_count": 10
+   },
+   "postgres": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+   "extensions": {
+    "age": "1.6.0",
+    "pg_trgm": "1.6",
+    "plpgsql": "1.0",
+    "vector": "0.8.0"
+   },
+   "pg_settings": {
+    "shared_buffers": "128MB",
+    "work_mem": "4MB",
+    "effective_cache_size": "4GB",
+    "jit_above_cost": "100000"
+   },
+   "data": {
+    "graph": "bench_graph",
+    "namespace": "tenant:bench:ws:main",
+    "nodes": 27365,
+    "nodes_in_namespace": 24626,
+    "edges": 69114,
+    "edges_in_namespace": 62258,
+    "fact_edges": 19009,
+    "chunks": 2828,
+    "age_size": "103 MB",
+    "tables_size": "64 MB"
+   }
+  },
+  "sample": {
+   "keys": 50,
+   "hub_keys": 25,
+   "subjects": 50,
+   "as_of": "2025-03-23T11:33:50Z",
+   "allowed_scopes": [
+    "project:p19",
+    "project:p0",
+    "project:p8",
+    "project:p13",
+    "project:p3"
+   ],
+   "degree_p50": 4,
+   "hub_degree_min": 11,
+   "degree_max": 2799,
+   "queries": 50,
+   "embedding_dim": 1536
+  },
+  "results": {
+   "entity_lookup": {
+    "tables:on": {
+     "p50_ms": 0.169,
+     "p95_ms": 0.249,
+     "mean_ms": 0.183,
+     "max_ms": 0.57,
+     "n": 200,
+     "hub": {
+      "p50_ms": 0.168,
+      "p95_ms": 0.237,
+      "mean_ms": 0.178,
+      "max_ms": 0.356,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 0.171,
+      "p95_ms": 0.253,
+      "mean_ms": 0.189,
+      "max_ms": 0.57,
+      "n": 100
+     }
+    },
+    "tables:off": {
+     "p50_ms": 0.127,
+     "p95_ms": 0.291,
+     "mean_ms": 0.153,
+     "max_ms": 0.514,
+     "n": 200,
+     "hub": {
+      "p50_ms": 0.125,
+      "p95_ms": 0.269,
+      "mean_ms": 0.148,
+      "max_ms": 0.462,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 0.129,
+      "p95_ms": 0.31,
+      "mean_ms": 0.158,
+      "max_ms": 0.514,
+      "n": 100
+     }
+    }
+   },
+   "one_hop": {
+    "tables:on": {
+     "p50_ms": 0.617,
+     "p95_ms": 3.584,
+     "mean_ms": 1.07,
+     "max_ms": 7.797,
+     "n": 200,
+     "hub": {
+      "p50_ms": 0.77,
+      "p95_ms": 3.971,
+      "mean_ms": 1.256,
+      "max_ms": 7.797,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 0.527,
+      "p95_ms": 2.96,
+      "mean_ms": 0.883,
+      "max_ms": 4.543,
+      "n": 100
+     }
+    },
+    "tables:off": {
+     "p50_ms": 1.002,
+     "p95_ms": 3.573,
+     "mean_ms": 1.497,
+     "max_ms": 17.273,
+     "n": 200,
+     "hub": {
+      "p50_ms": 1.249,
+      "p95_ms": 5.087,
+      "mean_ms": 1.847,
+      "max_ms": 17.273,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 0.846,
+      "p95_ms": 2.545,
+      "mean_ms": 1.146,
+      "max_ms": 4.678,
+      "n": 100
+     }
+    }
+   },
+   "two_hop": {
+    "tables:on": {
+     "p50_ms": 14.064,
+     "p95_ms": 91.853,
+     "mean_ms": 30.496,
+     "max_ms": 111.634,
+     "n": 200,
+     "hub": {
+      "p50_ms": 41.635,
+      "p95_ms": 97.892,
+      "mean_ms": 47.095,
+      "max_ms": 111.634,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 9.076,
+      "p95_ms": 62.592,
+      "mean_ms": 13.897,
+      "max_ms": 109.088,
+      "n": 100
+     }
+    },
+    "tables:off": {
+     "p50_ms": 13.849,
+     "p95_ms": 90.597,
+     "mean_ms": 28.735,
+     "max_ms": 142.552,
+     "n": 200,
+     "hub": {
+      "p50_ms": 40.332,
+      "p95_ms": 100.75,
+      "mean_ms": 45.038,
+      "max_ms": 142.552,
+      "n": 100
+     },
+     "uniform": {
+      "p50_ms": 8.583,
+      "p95_ms": 46.91,
+      "mean_ms": 12.432,
+      "max_ms": 87.771,
+      "n": 100
+     }
+    }
+   },
+   "neighborhood": {
+    "tables:on": {
+     "p50_ms": 3.609,
+     "p95_ms": 9.736,
+     "mean_ms": 4.408,
+     "max_ms": 16.405,
+     "n": 200
+    },
+    "tables:off": {
+     "p50_ms": 3.425,
+     "p95_ms": 9.552,
+     "mean_ms": 4.393,
+     "max_ms": 19.717,
+     "n": 200
+    }
+   },
+   "temporal_filter": {
+    "tables:on": {
+     "p50_ms": 1.201,
+     "p95_ms": 2.265,
+     "mean_ms": 1.339,
+     "max_ms": 4.319,
+     "n": 200
+    },
+    "tables:off": {
+     "p50_ms": 1.182,
+     "p95_ms": 2.296,
+     "mean_ms": 1.347,
+     "max_ms": 6.197,
+     "n": 200
+    }
+   },
+   "hybrid": {
+    "tables:on": {
+     "p50_ms": 610.365,
+     "p95_ms": 881.399,
+     "mean_ms": 638.942,
+     "max_ms": 1689.598,
+     "n": 188,
+     "truncated": true
+    },
+    "tables:off": {
+     "p50_ms": 572.622,
+     "p95_ms": 836.899,
+     "mean_ms": 603.248,
+     "max_ms": 1281.075,
+     "n": 199,
+     "truncated": true
+    }
+   }
+  },
+  "plans": {
+   "entity_lookup": {
+    "tables:on": {
+     "queries": 1,
+     "max_cost": 8.5
+    },
+    "tables:off": {
+     "queries": 1,
+     "max_cost": 8.5
+    }
+   },
+   "one_hop": {
+    "tables:on": {
+     "queries": 3,
+     "max_cost": 152.8
+    },
+    "tables:off": {
+     "queries": 3,
+     "max_cost": 152.8
+    }
+   },
+   "two_hop": {
+    "tables:on": {
+     "queries": 4,
+     "max_cost": 3388.6
+    },
+    "tables:off": {
+     "queries": 4,
+     "max_cost": 3388.6
+    }
+   },
+   "neighborhood": {
+    "tables:on": {
+     "queries": 3,
+     "max_cost": 976.3
+    },
+    "tables:off": {
+     "queries": 3,
+     "max_cost": 976.3
+    }
+   },
+   "temporal_filter": {
+    "tables:on": {
+     "queries": 1,
+     "max_cost": 26.5
+    },
+    "tables:off": {
+     "queries": 1,
+     "max_cost": 26.5
+    }
+   },
+   "hybrid": {
+    "tables:on": {
+     "queries": 22,
+     "max_cost": 8291.4
+    },
+    "tables:off": {
+     "queries": 22,
+     "max_cost": 8291.4
+    }
+   }
+  }
+ }
+}

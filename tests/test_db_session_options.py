@@ -20,7 +20,7 @@ def _settings(**kwargs: object) -> Settings:
 
 
 def test_jit_off_by_default() -> None:
-    """По умолчанию сервис ходит в БД с jit=off: AGE провоцирует JIT мусорными cost-оценками."""
+    """По умолчанию сервис ходит в БД с jit=off: так повелось с AGE (ADR-010), пересмотр — замером MEM-ADR-023."""
     assert session_options(_settings()) == {"options": "-c jit=off"}
 
 

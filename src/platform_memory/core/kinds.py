@@ -70,7 +70,7 @@ _DEFAULT_PACK_FILE = Path(__file__).parent / "packs" / "default.json"
 
 PACK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 PACK_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$")
-# Имя вида/связи — валидная AGE-метка (вид становится label узла, связь — типом ребра).
+# Имя вида/связи — валидная метка графа (вид становится label узла, связь — типом ребра).
 KIND_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 
 MAX_KINDS = 200
@@ -398,7 +398,7 @@ class RelationSpec:
 
     @property
     def edge_label(self) -> str:
-        """Тип ребра AGE (как у FactStore: предикат в верхнем регистре)."""
+        """Тип ребра графа (как у FactStore: предикат в верхнем регистре)."""
         return self.relation.upper()
 
     def to_payload(self) -> dict[str, Any]:

@@ -1,18 +1,19 @@
-# Ignore-file for `docker build -f memory-service/Dockerfile <superproject root>`.
+# Ignore-file for `docker build -f services/memory-service/Dockerfile <superproject root>`.
 # BuildKit prefers `<Dockerfile>.dockerignore` next to the Dockerfile over the root
-# `.dockerignore` (which excludes memory-service/ entirely, as it serves other services).
-# Allow-list: only what the two-stage build actually COPYs.
+# `.dockerignore` (which excludes services/memory-service/ entirely, as it serves other
+# services). Allow-list: only what the two-stage build actually COPYs (umbrella layout,
+# TAI-ADR-0064).
 *
-!memory-service/pyproject.toml
-!memory-service/uv.lock
-!memory-service/README.md
-!memory-service/LICENSE
-!memory-service/THIRD_PARTY.md
-!memory-service/src
-!memory-service/client
-!platform-auth-sdk/pyproject.toml
-!platform-auth-sdk/README.md
-!platform-auth-sdk/src
+!services/memory-service/pyproject.toml
+!services/memory-service/uv.lock
+!services/memory-service/README.md
+!services/memory-service/LICENSE
+!services/memory-service/THIRD_PARTY.md
+!services/memory-service/src
+!services/memory-service/client
+!sdk/platform-auth-sdk/pyproject.toml
+!sdk/platform-auth-sdk/README.md
+!sdk/platform-auth-sdk/src
 **/__pycache__
 **/*.pyc
 **/.venv

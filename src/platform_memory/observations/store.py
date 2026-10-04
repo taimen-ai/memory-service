@@ -180,6 +180,14 @@ class ObservationStore:
                     ix=sql.Identifier(f"{self.table}_ns_occurred"), tbl=self._tbl
                 )
             )
+            # Канал recent: фильтр по namespace и порядок list_recent — top-N по индексу
+            # без сортировки и полного просмотра namespace.
+            cur.execute(
+                sql.SQL(
+                    "CREATE INDEX IF NOT EXISTS {ix} ON {tbl} "
+                    "(namespace, (occurred_at = ''), occurred_at DESC, ingested_at DESC)"
+                ).format(ix=sql.Identifier(f"{self.table}_ns_recent"), tbl=self._tbl)
+            )
             cur.execute(
                 sql.SQL("CREATE INDEX IF NOT EXISTS {ix} ON {tbl} (namespace, status)").format(
                     ix=sql.Identifier(f"{self.table}_ns_status"), tbl=self._tbl
@@ -438,6 +446,36 @@ class ObservationStore:
         Сортировка: сначала event time (occurred_at, пустые в конце), затем
         время приёма. Фильтры: scopes (OR-пересечение), kinds, status.
         """
+        query, params = self._recent_query(
+            namespaces,
+            scopes=scopes,
+            kinds=kinds,
+            status=status,
+            limit=limit,
+            allowed_scopes=allowed_scopes,
+        )
+        with self.conn.cursor() as cur:
+            cur.execute(query, params)
+            return [self._row_record(r) for r in cur.fetchall()]
+
+    def _recent_query(
+        self,
+        namespaces: Sequence[str] = (),
+        *,
+        scopes: Sequence[str] = (),
+        kinds: Sequence[str] = (),
+        status: str = "",
+        limit: int = 50,
+        allowed_scopes: Sequence[str] | None = None,
+    ) -> tuple[sql.Composed, tuple[Any, ...]]:
+        """SQL канала recent: top-``limit`` каждого namespace по индексу ``_ns_recent``,
+        затем слияние namespaces с тем же порядком.
+
+        Порядок — по колонке ``ingested_at`` (timestamptz), а не по одноимённому
+        текстовому алиасу ``ingested_at::text`` из списка выборки. Подзапрос на
+        namespace нужен, потому что ``namespace = ANY(…)`` не даёт упорядоченного
+        чтения индекса: был бы полный просмотр и сортировка.
+        """
         nss = resolve_namespaces(namespaces, self.default_namespace)
         clause, params = self._scope_clause(resolve_scopes(scopes), allowed_scopes)
         extra = ""
@@ -447,17 +485,15 @@ class ObservationStore:
         if status:
             extra += " AND status = %s"
             params.append(status)
-        with self.conn.cursor() as cur:
-            cur.execute(
-                sql.SQL(
-                    "SELECT " + _COLUMNS + " FROM {tbl} "
-                    "WHERE namespace = ANY(%s)" + clause + extra + " "
-                    "ORDER BY (occurred_at = '') ASC, occurred_at DESC, ingested_at DESC "
-                    "LIMIT %s"
-                ).format(tbl=self._tbl),
-                (nss, *params, int(limit)),
-            )
-            return [self._row_record(r) for r in cur.fetchall()]
+        query = sql.SQL(
+            "SELECT " + _COLUMNS + " FROM unnest(%s::text[]) AS n(ns) CROSS JOIN LATERAL ("
+            "SELECT * FROM {tbl} o WHERE o.namespace = n.ns" + clause + extra + " "
+            "ORDER BY (o.occurred_at = '') ASC, o.occurred_at DESC, o.ingested_at DESC "
+            "LIMIT %s) r "
+            "ORDER BY (r.occurred_at = '') ASC, r.occurred_at DESC, r.ingested_at DESC "
+            "LIMIT %s"
+        ).format(tbl=self._tbl)
+        return query, (nss, *params, int(limit), int(limit))
 
     def search_lexical(
         self,

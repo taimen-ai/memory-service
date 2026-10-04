@@ -29,7 +29,7 @@ def _err(msg: str) -> None:
 
 @app.command()
 def init_db() -> None:
-    """Создать граф AGE и таблицу чанков (идемпотентно)."""
+    """Создать схему графа (таблицы узлов и рёбер) и таблицу чанков (идемпотентно)."""
     settings = get_settings()
     try:
         conn = dbmod.connect(settings)
@@ -147,7 +147,7 @@ def communities(
         False, "--label", help="Проставить LLM-метки сообществ (community_name)."
     ),
 ) -> None:
-    """Разметить сообщества графа (Leiden/Louvain) и записать их на узлы AGE."""
+    """Разметить сообщества графа (Leiden/Louvain) и записать их на узлы графа."""
     settings = get_settings()
     summary_llm = None
     if label:
@@ -511,6 +511,82 @@ def redrive_legacy(
             f"  пропущено {item['observation_id']}: {item['scope']} вне указанной видимости",
             fg=typer.colors.YELLOW,
         )
+
+
+@app.command("migrate-graph-from-age")
+def migrate_graph_from_age(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Только прочитать граф AGE и показать сверку, ничего не писать."
+    ),
+    batch_size: int = typer.Option(1000, "--batch-size", min=1, help="Строк в одной пачке."),
+    show: int = typer.Option(
+        20, "--show", min=0, help="Сколько записей отчёта показать на каждый их вид."
+    ),
+) -> None:
+    """Перенести граф из Apache AGE в таблицы графа (MEM-ADR-023 п.5); данные AGE не меняются.
+
+    Идемпотентно: повтор ничего не дублирует и доносит недостающее. В конце — сверка
+    числа узлов и рёбер по namespace (AGE против таблиц). Код выхода: 0 — сошлось;
+    1 — расхождение или пропущенные записи (см. отчёт); 2 — графа AGE нет, конфликт
+    имён в схеме или ошибка БД.
+    """
+    from platform_memory.graph.age_import import (
+        INFO_KINDS,
+        AgeGraphNotFound,
+    )
+    from platform_memory.graph.age_import import (
+        migrate_graph_from_age as run_migration,
+    )
+
+    settings = get_settings()
+    try:
+        report = run_migration(settings, dry_run=dry_run, batch_size=batch_size)
+    except (AgeGraphNotFound, dbmod.GraphSchemaConflict) as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    except Exception as exc:  # noqa: BLE001
+        _err(f"Ошибка переноса графа: {exc.__class__.__name__}: {exc}")
+        raise typer.Exit(2) from exc
+
+    mode = "DRY-RUN (ничего не записано)" if dry_run else "перенос"
+    typer.secho(f"=== Граф {report.graph!r}: {mode} ===", fg=typer.colors.CYAN, bold=True)
+    if report.catalog_warning:
+        typer.secho(f"Каталог AGE: {report.catalog_warning}", fg=typer.colors.YELLOW)
+    if not dry_run:
+        typer.echo(f"Вставлено: узлов {report.nodes_inserted}, рёбер {report.edges_inserted}")
+    typer.echo(
+        f"\n{'namespace':<40} {'узлы AGE':>9} {'дубли':>6} {'пропущ.':>7} {'таблицы':>8}"
+        f" | {'рёбра AGE':>9} {'дубли':>6} {'пропущ.':>7} {'таблицы':>8}"
+    )
+    bad = set(report.mismatched())
+    for ns in sorted(report.namespaces):
+        c = report.namespaces[ns]
+        line = (
+            f"{ns:<40} {c.age_nodes:>9} {c.dup_nodes:>6} {c.skipped_nodes:>7} {c.table_nodes:>8}"
+            f" | {c.age_edges:>9} {c.dup_edges:>6} {c.skipped_edges:>7} {c.table_edges:>8}"
+        )
+        typer.secho(line, fg=typer.colors.RED if ns in bad else None)
+    for kind, items in sorted(report.by_kind().items()):
+        color = typer.colors.YELLOW if kind in INFO_KINDS else typer.colors.RED
+        typer.secho(f"\n{kind}: {len(items)}", fg=color)
+        for a in items[:show]:
+            typer.echo(f"  {a.namespace} {a.label} age_id={a.age_id} {a.detail}")
+        if len(items) > show:
+            typer.echo(f"  … ещё {len(items) - show}")
+    if report.ok:
+        done = (
+            "пропусков нет, перенос пройдёт без потерь"
+            if dry_run
+            else "сверка сошлась (таблицы = AGE − дубли)"
+        )
+        typer.secho(f"\nOK: {done}.", fg=typer.colors.GREEN)
+        return
+    typer.secho(
+        f"\nРАСХОЖДЕНИЕ в namespaces: {', '.join(sorted(bad))} — см. отчёт выше.",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(1)
 
 
 def main() -> None:

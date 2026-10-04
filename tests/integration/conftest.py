@@ -1,9 +1,12 @@
-"""Интеграционные тесты на реальной БД (AGE + pgvector).
+"""Интеграционные тесты на реальной БД (PostgreSQL + pgvector).
 
-Запуск: поднять infra/memory-db (docker) и задать CB_TEST_DATABASE_URL, например::
+Граф — обычные таблицы (MEM-ADR-023): расширение графа и суперпользователь не нужны,
+достаточно расширений ``vector``/``pg_trgm`` и роли-владельца базы. Запуск, например::
 
     docker run -d --name memtest-db -e POSTGRES_USER=brain -e POSTGRES_PASSWORD=brain \
-      -e POSTGRES_DB=company_brain -p 127.0.0.1:5435:5432 memory-db:smoke
+      -e POSTGRES_DB=company_brain -p 127.0.0.1:5435:5432 pgvector/pgvector:pg16
+    docker exec memtest-db psql -U brain -d company_brain \
+      -c 'CREATE EXTENSION IF NOT EXISTS vector' -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
     CB_TEST_DATABASE_URL=postgresql://brain:brain@127.0.0.1:5435/company_brain \
       uv run pytest tests/integration -q
 

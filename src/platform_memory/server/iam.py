@@ -28,7 +28,7 @@ token IAM через общий ``platform-auth-sdk`` (подпись по JWKS,
   каждый data-запрос получит 403 от ``_authorize``.
 
 Это единственное место в пакете, где импортируется ``platform_auth`` — осознанное
-исключение из инварианта изоляции (CLAUDE.md, инвариант 1; ADR-018): SDK enforcement
+исключение из инварианта изоляции (AGENTS.md, инвариант 1; ADR-018): SDK enforcement
 общий для всех resource services платформы, а сам движок памяти его не видит.
 """
 
@@ -198,7 +198,7 @@ async def verify_token(settings: Settings, token: str) -> CallerGrants:
 # --- клиент policy-service (MEM-ADR-019) --------------------------------------
 #
 # Живёт здесь, а не в server/visibility.py: SDK платформы импортируется только в
-# этом модуле (инвариант 1 CLAUDE.md), при сборке без SDK удаляется вместе с ним.
+# этом модуле (инвариант 1 AGENTS.md), при сборке без SDK удаляется вместе с ним.
 
 PolicyUnavailable = AuthorizationUnavailable
 

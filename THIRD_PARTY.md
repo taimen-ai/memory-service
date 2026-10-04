@@ -17,7 +17,7 @@ licence-clean unit that builds and ships on its own (isolation invariant).
 ## Runtime dependency outside the package (not vendored): platform-auth-sdk
 
 - **Source:** separate repository `platform-auth-sdk` of the Taimen platform
-  (path dependency `../platform-auth-sdk`), licensed under Apache-2.0.
+  (path dependency `../../sdk/platform-auth-sdk`), licensed under Apache-2.0.
 - **Why:** verification of platform IAM access tokens on the HTTP edge
   (`src/platform_memory/server/iam.py` only) — ADR-018; superproject ADR-0013/0030.
 - **Optional:** the engine builds and runs without it — drop `server/iam.py` and the

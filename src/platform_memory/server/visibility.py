@@ -38,7 +38,7 @@ from platform_memory.core.namespaces import (
 from platform_memory.core.scopes import MAX_ALLOWED_SCOPES, resolve_scopes
 from platform_memory.server import iam
 
-# SDK платформы импортируется только в server/iam.py (инвариант 1 CLAUDE.md):
+# SDK платформы импортируется только в server/iam.py (инвариант 1 AGENTS.md):
 # здесь клиент policy и тип контекста берутся оттуда.
 PolicyUnavailable = iam.PolicyUnavailable
 

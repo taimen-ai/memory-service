@@ -29,11 +29,12 @@ services:
 
   memory-service:
     build:
-      # Контекст — корень суперпроекта: рядом лежит platform-auth-sdk (path-зависимость
-      # для проверки IAM-токенов, ADR-018). Файл Dockerfile.dockerignore ограничивает
-      # контекст только memory-service/ и platform-auth-sdk/.
-      context: ../..
-      dockerfile: memory-service/Dockerfile
+      # Контекст — корень суперпроекта: platform-auth-sdk лежит в sdk/ (path-зависимость
+      # для проверки IAM-токенов, ADR-018; раскладка TAI-ADR-0064). Файл
+      # Dockerfile.dockerignore ограничивает контекст services/memory-service/ и
+      # sdk/platform-auth-sdk/.
+      context: ../../..
+      dockerfile: services/memory-service/Dockerfile
     restart: unless-stopped
     depends_on:
       memory-db:

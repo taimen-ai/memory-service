@@ -1,7 +1,7 @@
 """Интеграционные тесты plugin-facing API (recall/search/retain/audit/trace/health).
 
 Вызов хендлеров напрямую (без сети). Проверяем контракт plugin-facing API и
-формирование подграфа трейса задачи на реальной AGE+pgvector.
+формирование подграфа трейса задачи на реальной БД (PostgreSQL + pgvector).
 """
 
 from __future__ import annotations
@@ -211,7 +211,8 @@ def test_health_ok(app_with_vault):
 
 def test_concurrent_audit_same_trace_does_not_fail(test_settings, clean_db):
     """Регрессия: параллельные audit-события одного trace_id апсертят общий якорь
-    pc_trace — без сериализации AGE падает с 'Entity failed to be updated'."""
+    pc_trace — upsert (INSERT … ON CONFLICT) не падает на гонке (при AGE падал с
+    'Entity failed to be updated' без advisory-лока)."""
     from concurrent.futures import ThreadPoolExecutor
 
     conn0 = dbmod.connect(test_settings)

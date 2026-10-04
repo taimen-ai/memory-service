@@ -4,9 +4,9 @@
 Якоря разрешаются пачкой (граф — запрос точных ключей и запрос по журналу/псевдонимам,
 журнал — не больше трёх запросов на все якоря и namespaces), уровень шага обхода —
 запрос рёбер и запрос концов на весь фронт. Число SQL поэтому не зависит от числа
-якорей и стартовых узлов, а графовые запросы не просматривают все вершины графа
-(неразмеченный ``MATCH (n)`` читает узлы всех namespaces — так typed-запрос на
-staging занимал секунды).
+якорей и стартовых узлов, а графовые запросы не просматривают таблицы графа целиком
+(узлы всех namespaces — так typed-запрос на staging занимал секунды): каждый идёт
+по индексу (MEM-ADR-023).
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import psycopg
 import pytest
 
 from platform_memory.context.typed import compile_typed_context
-from platform_memory.core.db import agtype
 from platform_memory.domain.reconcile import reconcile
 from platform_memory.domain.registry import open_registry
 
@@ -96,25 +95,32 @@ def graph_db(stores, settings):
     # Узлы другого namespace в общем графе: typed-запросы NS их не читают.
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT * FROM cypher('{graph.graph}', $$ UNWIND $rows AS r "
-            "CREATE (:document {natural_key: r, namespace: $ns, type: 'document'}) "
-            "$$, %s) AS (v agtype)",
-            (agtype({"rows": [f"doc:{i}" for i in range(3000)], "ns": OTHER}),),
+            graph.sql(
+                "INSERT INTO {N} (namespace, label, natural_key, type) "
+                "SELECT %s, 'document', 'doc:' || i, 'document' FROM generate_series(0, 2999) i"
+            ),
+            (OTHER,),
         )
+        cur.execute(graph.sql("ANALYZE {N}"))
+        cur.execute(graph.sql("ANALYZE {E}"))
     return conn
 
 
 class _Counting(psycopg.Cursor):
     statements: list[str] = []
+    graph_reads: list[tuple[str, object]] = []
 
     def execute(self, query, params=None, **kw):  # type: ignore[override]
-        text = query if isinstance(query, str) else query.as_string(self.connection)
-        _Counting.statements.append(str(text))
+        text = str(query if isinstance(query, str) else query.as_string(self.connection))
+        _Counting.statements.append(text)
+        if "graph_nodes" in text and text.lstrip().upper().startswith(("SELECT", "WITH")):
+            _Counting.graph_reads.append((text, params))
         return super().execute(query, params, **kw)
 
 
 def _typed(settings, conn, payload: dict) -> tuple[dict, list[str]]:
     _Counting.statements = []
+    _Counting.graph_reads = []
     conn.cursor_factory = _Counting
     try:
         pack = compile_typed_context(settings, {"namespaces": [NS], **payload}, conn=conn)
@@ -143,11 +149,15 @@ CODING_TASK = {
 }
 
 
-def _no_full_graph_scan(statements: list[str]) -> None:
-    for text in statements:
-        if "cypher(" in text:
-            # Каждый графовый запрос typed-пути — по метке: ``(n:<метка>…``.
-            assert "MATCH (n)" not in text and "(a)-[" not in text, text
+def _no_full_graph_scan(conn) -> None:
+    """Каждое чтение таблиц графа typed-пути идёт по индексу: без seq scan плана нет."""
+    assert _Counting.graph_reads
+    for text, params in _Counting.graph_reads:
+        with conn.transaction(), conn.cursor() as cur:
+            cur.execute("SET LOCAL enable_seqscan = off")
+            cur.execute("EXPLAIN " + text, params)
+            plan = "\n".join(r[0] for r in cur.fetchall())
+        assert "Seq Scan on graph_" not in plan, (text, plan)
 
 
 def test_one_anchor_one_step_sql_budget(settings, graph_db):
@@ -155,7 +165,7 @@ def test_one_anchor_one_step_sql_budget(settings, graph_db):
     assert pack["anchors"][0]["matchedBy"] == "normalized"
     assert pack["stats"]["steps"][0]["reached"] == 15
     assert len(statements) <= ONE_ANCHOR_MAX_SQL, statements
-    _no_full_graph_scan(statements)
+    _no_full_graph_scan(graph_db)
 
 
 def test_coding_task_profile_sql_budget(settings, graph_db):
@@ -169,7 +179,7 @@ def test_coding_task_profile_sql_budget(settings, graph_db):
     assert [s["reached"] for s in pack["stats"]["steps"]] == [20, 3, 4]
     assert pack["unresolved"] == []
     assert len(statements) <= CODING_TASK_MAX_SQL, statements
-    _no_full_graph_scan(statements)
+    _no_full_graph_scan(graph_db)
 
 
 def test_sql_count_independent_of_anchor_count(settings, graph_db):

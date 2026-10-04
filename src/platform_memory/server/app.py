@@ -178,6 +178,16 @@ async def _data_error_handler(_request: Request, exc: psycopg.errors.DataError) 
     return JSONResponse(status_code=400, content={"detail": f"Некорректные данные запроса: {exc}"})
 
 
+@app.exception_handler(dbmod.GraphKeyTooLong)
+async def _graph_key_handler(_request: Request, exc: dbmod.GraphKeyTooLong) -> JSONResponse:
+    """Ключ узла или метка длиннее предела индекса -> 400 с кодом в начале ``detail``.
+
+    Те же 400 и текст дают маршруты, которые сами переводят ``ValueError`` в 400:
+    ``natural_key_too_long: …`` / ``label_too_long: …`` (MEM-ADR-023).
+    """
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
 @app.exception_handler(UnknownKindError)
 @app.exception_handler(AttributesError)
 @app.exception_handler(UnknownRelationError)

@@ -3,7 +3,7 @@
 Покрывает сквозной цикл: write_and_index_fact (origin='agent') → retrieve → hits содержат
 агентский узел, sources указывают на agent:run/... (не .md-файл vault).
 
-Требует Postgres (AGE + pgvector): CB_TEST_DATABASE_URL, см. conftest.
+Требует Postgres (pgvector): CB_TEST_DATABASE_URL, см. conftest.
 """
 
 from __future__ import annotations
