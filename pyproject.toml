@@ -1,6 +1,6 @@
 [project]
 name = "platform-memory"
-version = "0.1.0"
+version = "0.2.1"
 description = "Product-neutral memory engine (typed knowledge graph + vector retrieval over Apache AGE + pgvector). Apache-2.0 — see LICENSE and THIRD_PARTY.md."
 requires-python = ">=3.12"
 # Own licence (Apache-2.0). Isolation invariant: this package stays licence- and

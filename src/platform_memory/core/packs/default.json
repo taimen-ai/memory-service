@@ -1,7 +1,7 @@
 {
   "name": "default",
   "version": "1",
-  "description": "Пакет по умолчанию: бизнес-онтология vault (схемы schemas/*.schema.json vault), бывший код core/ontology.py. Виды question и project синтетические — их создаёт ingest поверх vault.",
+  "description": "The default pack: the vault business ontology (the vault's schemas/*.schema.json), formerly the code of core/ontology.py. The question and project kinds are synthetic — ingest creates them on top of the vault.",
   "kinds": [
     {
       "kind": "legal_entity"
